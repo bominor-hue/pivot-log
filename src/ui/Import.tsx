@@ -112,6 +112,7 @@ export function Settings({ onMe }: { onMe: (name: string) => void }) {
   const { me, state, toast } = useNav()
   const [name, setName] = useState(me)
   const [asOf, setAsOf] = useState(state.asOf)
+  const [sure, setSure] = useState(false)
   const waiting = useLiveQuery(() => db.entries.where('synced').equals(0).count(), [], 0)
   return (
     <div className="page">
@@ -129,7 +130,8 @@ export function Settings({ onMe }: { onMe: (name: string) => void }) {
       {supabase && <button className="cta sec2" onClick={async () => { const r = await pushEntries(); toast(r.error ?? `${r.sent} sent`) }}>Send now</button>}
       <p className="note">Until the farm's hosted database is set up, everything stays on this device. Don't clear browser data on a phone with unsent entries.</p>
       <div className="sec">Reset</div>
-      <button className="cta off" onClick={() => { if (confirm('Erase everything on this device? Entries not yet sent will be lost.')) clearAll() }}>Erase this device</button>
+      <button className="cta off" onClick={() => (sure ? clearAll() : setSure(true))}>{sure ? 'Tap again to erase everything' : 'Erase this device'}</button>
+      {sure && <p className="note warn">Entries not yet sent will be lost.</p>}
     </div>
   )
 }

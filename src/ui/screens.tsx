@@ -86,13 +86,15 @@ export function Log() {
 
 function VoidButton({ id, pivotId }: { id: string; pivotId: string }) {
   const { state, me, toast } = useNav()
+  const [sure, setSure] = useState(false)
   if (state.entries.some((e) => e.action === 'void' && e.correctsId === id)) return <span className="pill p-none">Undone</span>
-  return <button className="btn sm" onClick={async () => {
-    if (!confirm('Cancel this entry? It stays in the records, marked as cancelled.')) return
+  // Two taps instead of a confirm() dialog, which some browsers and embedded views block.
+  return <button className={`btn sm ${sure ? 'off' : ''}`} onBlur={() => setSure(false)} onClick={async () => {
+    if (!sure) { setSure(true); return }
     const now = new Date().toISOString()
     await db.entries.add({ id: uid(), pivotId, action: 'void', correctsId: id, happenedAt: now, recordedAt: now, who: me || 'Unknown', how: 'app', synced: 0 })
-    toast('Entry cancelled')
-  }}>Undo</button>
+    toast('Entry cancelled; it stays in the records')
+  }}>{sure ? 'Tap to confirm' : 'Undo'}</button>
 }
 
 export function Fields() {

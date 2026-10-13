@@ -2,6 +2,9 @@ import { useMemo, useState } from 'react'
 import { buildReport, REPORTS, toCSV, type Filters } from '../reports/reports'
 import { useNav } from './common'
 
+// The one-file preview runs in a sandbox that blocks downloads and printing.
+const PREVIEW = import.meta.env.MODE === 'single'
+
 function download(name: string, text: string) {
   const a = document.createElement('a')
   a.href = URL.createObjectURL(new Blob([text], { type: 'text/csv;charset=utf-8' }))
@@ -11,7 +14,7 @@ function download(name: string, text: string) {
 }
 
 export function Reports() {
-  const { state, me } = useNav()
+  const { state, me, toast } = useNav()
   const [id, setId] = useState<string>('season')
   const [f, setF] = useState<Filters>({ farm: '', crop: '', from: `${state.year}-01-01`, to: state.asOf })
   const r = useMemo(() => buildReport(id, state, f, me), [id, state, f, me])
@@ -27,8 +30,10 @@ export function Reports() {
         <select value={f.crop} onChange={(e) => setF({ ...f, crop: e.target.value })}><option value="">All crops</option>{crops.map((c) => <option key={c}>{c}</option>)}</select>
         <input type="date" value={f.from} onChange={(e) => setF({ ...f, from: e.target.value })} aria-label="From" />
         <input type="date" value={f.to} onChange={(e) => setF({ ...f, to: e.target.value })} aria-label="To" />
-        <button className="btn pri" onClick={() => download(`${r.id}_${f.from}_${f.to}.csv`, toCSV(r))}>Export CSV</button>
-        <button className="btn" onClick={() => window.print()}>Print or PDF</button>
+        {PREVIEW
+          ? <button className="btn pri" onClick={() => navigator.clipboard.writeText(toCSV(r)).then(() => toast('CSV copied; paste it into Excel'), () => toast('Copy did not work here'))}>Copy CSV</button>
+          : <button className="btn pri" onClick={() => download(`${r.id}_${f.from}_${f.to}.csv`, toCSV(r))}>Export CSV</button>}
+        {!PREVIEW && <button className="btn" onClick={() => window.print()}>Print or PDF</button>}
       </div>
       <div className="rep">
         <div className="note" style={{ margin: '0 0 6px' }}>{r.title} · for {r.who}</div>
