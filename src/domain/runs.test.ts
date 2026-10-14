@@ -61,3 +61,25 @@ describe('pivot profile', () => {
     expect(hoursPerPass(p, 50)).toBe(18)
   })
 })
+
+describe('lap time', () => {
+  it('is learned from one-lap runs that made it around', async () => {
+    const { learnLapHours } = await import('./runs')
+    const p = pivot(); delete p.profile.hoursPerRev100
+    const runs = buildRuns([
+      e('on', '2026-07-01T00:00:00Z', { percentTimer: 50, plannedStop: 'lap' }), e('off', '2026-07-02T12:00:00Z', { madeItAround: true }),
+      e('on', '2026-07-03T00:00:00Z', { percentTimer: 50, plannedStop: 'lap' }), e('off', '2026-07-03T10:00:00Z', { madeItAround: false }),
+    ], p, 150)
+    expect(learnLapHours(runs)).toEqual({ hours: 18, laps: 1 }) // 36 h at 50% = 18 h at 100%
+    const running = buildRuns([e('on', '2026-07-05T00:00:00Z', { percentTimer: 50, plannedStop: 'lap' })], p, 150, new Date('2026-07-05T01:00:00Z'), 18)
+    expect(running[0].eta).toBe('2026-07-06T12:00:00.000Z')
+  })
+  it('spreads an AgSense week evenly', () => {
+    const runs = buildRuns([e('run', '2026-07-08T03:59:59Z', { how: 'agsense', hours: 14, startAt: '2026-07-01T04:00:00Z', stopAt: '2026-07-08T03:59:59Z' })], pivot(), 150)
+    expect(runs[0].hours).toBe(14)
+    const d = dailyApplied(runs)
+    const perHour = 900 / (452.6 * 150)
+    expect([...d.values()].reduce((a, b) => a + b, 0)).toBeCloseTo(14 * perHour, 3)
+    expect(d.get('2026-07-03')).toBeCloseTo(2 * perHour, 3)
+  })
+})

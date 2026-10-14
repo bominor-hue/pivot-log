@@ -1,18 +1,24 @@
-import { db, getSetting, uid, type CropSeason, type Entry, type Farm, type Field, type Pivot } from '../db'
+import { db, getSetting, uid, type CropSeason, type Entry, type Farm, type Field, type Pivot, type ProbeReading } from '../db'
 import { advise, isCrop, runBalance, type Advice, type BalanceDay } from '../model/waterBalance'
-import { buildRuns, dailyApplied, type Run } from './runs'
-import { num } from './pivot'
+import { buildRuns, dailyApplied, learnLapHours, type Run } from './runs'
+import { hoursPerPass, num } from './pivot'
 
 // Everything a screen needs, computed from the local database: fields with today's water balance,
 // pivots with their runs. Small enough (a farm is ~100 fields) to recompute on every change.
 
-export interface FieldView { field: Field; farm: Farm; pivot: Pivot | null; season: CropSeason | null; days: BalanceDay[]; advice: Advice; appliedIn: number; rainIn: number; needIn: number }
-export interface PivotView { pivot: Pivot; farm: Farm; fields: Field[]; acres: number | null; runs: Run[]; running: Run | null; lastRun: Run | null }
+export interface FieldView {
+  field: Field; farm: Farm; pivot: Pivot | null; season: CropSeason | null; days: BalanceDay[]; advice: Advice; appliedIn: number; rainIn: number; needIn: number
+  probes: ProbeReading[]
+  probeGap: { date: string; probe: number; model: number } | null // latest reading more than 15 points off the model
+}
+export interface PivotView { pivot: Pivot; farm: Farm; fields: Field[]; acres: number | null; runs: Run[]; running: Run | null; lastRun: Run | null
+  lapHours100: { hours: number; source: string } | null // hours per lap at 100%: dealer chart, else learned from laps
+}
 export interface FarmState { asOf: string; year: number; farms: Farm[]; fields: FieldView[]; pivots: PivotView[]; entries: Entry[]; weatherFrom: string | null; weatherTo: string | null; weatherSource: string }
 
 export async function loadState(): Promise<FarmState> {
-  const [farms, fields, pivots, seasons, entries, weather] = await Promise.all([
-    db.farms.toArray(), db.fields.toArray(), db.pivots.toArray(), db.cropSeasons.toArray(), db.entries.toArray(), db.weather.orderBy('date').toArray(),
+  const [farms, fields, pivots, seasons, entries, weather, probes] = await Promise.all([
+    db.farms.toArray(), db.fields.toArray(), db.pivots.toArray(), db.cropSeasons.toArray(), db.entries.toArray(), db.weather.orderBy('date').toArray(), db.probes.toArray(),
   ])
   const today = new Date().toISOString().slice(0, 10)
   const asOfSetting = await getSetting<string | null>('asOf', null)
@@ -24,8 +30,11 @@ export async function loadState(): Promise<FarmState> {
   const pviews: PivotView[] = pivots.map((p) => {
     const fs = fields.filter((f) => f.pivotId === p.id)
     const acres = num(p, 'irrigatedAcres') ?? (fs.reduce((s, f) => s + (seasonByField.get(f.id)?.acres ?? 0), 0) || null)
-    const runs = buildRuns(entries, p, acres)
-    return { pivot: p, farm: farmById.get(p.farmId)!, fields: fs, acres, runs, running: runs.find((r) => r.start && !r.stop) ?? null, lastRun: runs.filter((r) => r.stop).at(-1) ?? null }
+    const chart = num(p, 'hoursPerRev100')
+    const learned = chart ? null : learnLapHours(buildRuns(entries, p, acres), num(p, 'arcDeg') ?? 360)
+    const lapHours100 = chart ? { hours: chart, source: p.profile.hoursPerRev100.source } : learned ? { hours: learned.hours, source: `learned from ${learned.laps} lap${learned.laps > 1 ? 's' : ''} (estimate)` } : null
+    const runs = buildRuns(entries, p, acres, new Date(), learned?.hours ?? null)
+    return { pivot: p, farm: farmById.get(p.farmId)!, fields: fs, acres, runs, running: runs.find((r) => r.start && !r.stop) ?? null, lastRun: runs.filter((r) => r.stop).at(-1) ?? null, lapHours100 }
   }).sort((a, b) => a.pivot.name.localeCompare(b.pivot.name, undefined, { numeric: true }))
   const pvById = new Map(pviews.map((v) => [v.pivot.id, v]))
 
@@ -39,23 +48,36 @@ export async function loadState(): Promise<FarmState> {
   const fviews: FieldView[] = fields.map((f) => {
     const season = seasonByField.get(f.id) ?? null
     const pivot = f.pivotId ? pvById.get(f.pivotId)?.pivot ?? null : null
-    const base = { field: f, farm: farmById.get(f.farmId)!, pivot, season, days: [] as BalanceDay[], appliedIn: 0, rainIn: 0, needIn: 0 }
+    const fp = probes.filter((x) => x.fieldId === f.id && x.date <= asOf).sort((a, b) => a.date.localeCompare(b.date))
+    const base = { field: f, farm: farmById.get(f.farmId)!, pivot, season, days: [] as BalanceDay[], appliedIn: 0, rainIn: 0, needIn: 0, probes: fp, probeGap: null }
     if (!season || !isCrop(season.crop) || !season.plantDate || !pivot || pivot.aws50 == null || pivot.aws100 == null || !dates.length)
-      return { ...base, advice: { status: 'none', pctDry: 0, daysToTrigger: null, recommendGrossIn: 0, line: !season ? 'No crop this year' : !dates.length ? 'No weather yet' : pivot?.aws50 == null ? 'No soil data' : 'Not modeled' } as Advice }
+      return { ...base, advice: { status: 'none', pctDry: 0, daysToTrigger: null, startInDays: null, recommendGrossIn: 0, weekGrossIn: 0, cropUsePerDay: 0, lapDays: 0, line: !season ? 'No crop this year' : !dates.length ? 'No weather yet' : pivot?.aws50 == null ? 'No soil data' : 'Not modeled' } as Advice }
     const rmap = rainBy.get(pivot.id) ?? new Map()
     const applied = dailyApplied(pvById.get(pivot.id)!.runs)
     const days = runBalance({
       crop: season.crop, plantDate: season.plantDate, soil: { aws50: pivot.aws50, aws100: pivot.aws100 }, dates, eto,
       rain: dates.map((d) => rmap.get(d) ?? 0), appliedGross: dates.map((d) => applied.get(d) ?? 0),
     })
+    const pvw = pvById.get(pivot.id)!
+    const lastPct = state_lastPct(entries, pivot.id)
+    const lapHours = pvw.lapHours100 ? hoursPerPass(pivot, lastPct, pvw.lapHours100.hours) : null
+    const lp = fp.at(-1), md = lp && days.find((d) => d.date === lp.date)
+    const modelPct = md && md.taw > 0 ? (100 * (md.depletionApplied ?? md.depletionRainOnly)) / md.taw : null
+    const probeGap = lp && modelPct !== null && Math.abs(lp.pctUsed - modelPct) > 15 ? { date: lp.date, probe: lp.pctUsed, model: modelPct } : null
     return {
-      ...base, days, advice: advise(days, season.crop),
+      ...base, days, probeGap, advice: advise(days, season.crop, lapHours),
       appliedIn: days.reduce((s, d) => s + d.appliedGross, 0), rainIn: days.reduce((s, d) => s + d.rain, 0), needIn: days.reduce((s, d) => s + d.irrRecGross, 0),
     }
   }).sort((a, b) => a.field.name.localeCompare(b.field.name, undefined, { numeric: true }))
 
   const wsrc = weather.at(-1)?.source ?? ''
   return { asOf, year, farms: farms.sort((a, b) => a.name.localeCompare(b.name)), fields: fviews, pivots: pviews, entries, weatherFrom: weather[0]?.date ?? null, weatherTo: weather.at(-1)?.date ?? null, weatherSource: wsrc }
+}
+
+/** Percent timer of the pivot's last ON (100 if none), used to size the lap for the recommendation. */
+function state_lastPct(entries: Entry[], pivotId: string): number {
+  const on = entries.filter((e) => e.pivotId === pivotId && (e.action === 'on' || e.action === 'run') && e.percentTimer).sort((a, b) => b.happenedAt.localeCompare(a.happenedAt))[0]
+  return on?.percentTimer ?? 100
 }
 
 /** Load the JA Minor 2026 demo farm (fields, boundaries, soils, weather) into an empty app. */
@@ -85,6 +107,7 @@ export async function loadDemo(url = './demo/ja_minor_2026.json') {
     await db.imports.add({ id: uid(), kind: 'demo', fileName: 'ja_minor_2026.json', at, who: 'demo', summary: `${demo.fields.length} fields, ${demo.pivots.length} pivots, ${demo.dates.length} days of weather` })
     await db.settings.put({ key: 'asOf', value: '2026-07-16' })
     await db.settings.put({ key: 'demo', value: true })
+    await db.settings.put({ key: 'imagery', value: { url: './imagery/sentinel2_20260624.jpg', bounds: [-84.43, 31.89, -83.95, 32.21], label: 'Sentinel-2, June 24, 2026 (ESA Copernicus)' } })
   })
 }
 

@@ -39,6 +39,7 @@ export interface Entry {
   endGun?: boolean | null
   madeItAround?: boolean | null // on OFF
   startAt?: string | null; stopAt?: string | null // on a past run ('run')
+  hours?: number | null // on an AgSense period total: run hours inside startAt..stopAt
   note?: string | null
   correctsId?: string | null // on 'void'
   synced: 0 | 1
@@ -48,6 +49,10 @@ export interface WeatherDay { date: string; eto: number; source: string }
 export interface RainDay { pivotId: string; date: string; inches: number; source: string }
 export interface ImportLog { id: string; kind: string; fileName: string; at: string; who: string; summary: string }
 export interface Setting { key: string; value: any }
+/** A probe reading at a check site, as % of the soil's available water used (same scale as the model). */
+export interface ProbeReading { id: string; fieldId: string; date: string; pctUsed: number; source: string }
+/** Crew member. The PIN is stored hashed; the office sets it in Settings. */
+export interface Person { id: string; name: string; role: 'crew' | 'manager' | 'office'; pinHash: string | null }
 
 class PivotLogDB extends Dexie {
   farms!: Table<Farm, string>
@@ -59,6 +64,8 @@ class PivotLogDB extends Dexie {
   rain!: Table<RainDay, [string, string]>
   imports!: Table<ImportLog, string>
   settings!: Table<Setting, string>
+  probes!: Table<ProbeReading, string>
+  people!: Table<Person, string>
   constructor() {
     super('pivot-log')
     this.version(1).stores({
@@ -72,6 +79,7 @@ class PivotLogDB extends Dexie {
       imports: 'id, at',
       settings: 'key',
     })
+    this.version(2).stores({ entries: 'id, pivotId, happenedAt, synced, how', probes: 'id, fieldId, date', people: 'id, name' })
   }
 }
 

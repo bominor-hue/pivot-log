@@ -3,15 +3,24 @@
 Irrigation records and water scheduling for JA Minor Family Farms (81 pivots, 90 irrigated fields).
 A web app that installs to a phone's home screen from a link and works with no signal.
 
-## What's in the first version
+## What's in the first version (PRD v3 must-haves)
 
-- **Today**: what's running, which fields need water (from the daily water balance), runs that need a look, and pivots near you (GPS).
-- **Turn ON / Turn OFF**: one tap. ON records start time, forward or reverse, percent timer, where to stop (one lap, at a position in degrees, or keep going) and end gun. OFF records stop time and whether it made it around. Past runs can be entered after the fact.
-- **Entries are never edited.** Undo adds a correction entry; both stay in the records. Runs are rebuilt from entries every time.
-- **Daily water balance** per field, ported from `model/water_balance.py` (same settings; a test checks it matches the Python model day by day). Logged runs feed it as applied water.
-- **Import**: field list (Excel/CSV), boundaries (zipped shapefile, KML, KMZ, GeoJSON), the pivot info sheet ("Fill in" tab, blank template included), and weather (ETo and rain CSV). Every import previews found / matched / need a look before saving, and is logged.
-- **Reports**: season water by field, irrigation run records, pivot health. Filters, one layout (answer first, units, totals, as-of and sources), CSV export and print to PDF.
-- **Demo**: Import > "Load the JA Minor 2026 demo" loads the real 2026 fields, boundaries, soils, radar rain and ET, as of July 16.
+1. **Turn on**: start time (defaults to now), forward or reverse, percent timer, stop point (one lap, at a degree, keep going), end gun. Shows lap time and inches per lap and remembers the last settings.
+2. **Turn off**: stop time, made it around or stopped part way. **Log a past run** for missed entries.
+3. **Lap reminder** an hour before and when a pivot should be around (in-app, plus a system notification if allowed). Lap time is learned from "made it around" until the dealer chart value is on the pivot profile.
+4. **Running now** on Today, with long runs flagged "Still running?".
+5. **Offline**: everything is saved on the phone (IndexedDB) and sent when there's signal. Entries are never edited; undo adds a correction entry.
+6. **Import**: field list or crop plan (Excel/CSV), boundaries (zipped shapefile, KML, KMZ, GeoJSON), the pivot info sheet ("Fill in" tab, blank template included), weather. Preview counts first; blank cells never erase.
+7. **AgSense weekly CSV** (Pivot Summary for one week). Pivots whose unit always reads dry count their walking hours as wet. A week can't be imported twice.
+8. **Water balance** for every field, ported from `model/water_balance.py` (a test checks it matches day by day): status, days until water is needed, this week's water.
+9. **Field screen**: action line ("Turn on today", "Hold until Thursday"), growth stage by days after planting with a tip, soil water and season-to-date charts (rain, need, applied), last runs, and "show me why" on every number.
+10. **Map** of every field and pivot circle on Sentinel-2 imagery, colored by soil water, 7-day rain or crop, filter by farm.
+11. **Reports**: season water by field, weekly applied vs recommended, run records, water use by source, irrigated acres and crops, pivot health. Filter, pick columns, group with subtotals, save. Export Excel (with a Notes sheet), CSV, and PDF by printing.
+12. **Probe readings** (CSV) shown on the field's soil water chart; a gap of more than 15 points from the model is flagged.
+
+**Sign-in**: the office adds people with a 4-digit PIN in Settings (the first person added runs the office). The app then asks "Who's logging?" and every entry carries that name. Works with no signal. Only office and manager roles can import. Email-link sign-in for the office comes with the hosted database.
+
+**Demo**: Import > "Load the JA Minor 2026 demo" loads the real 2026 fields, boundaries, soils, radar rain, ET and imagery, as of July 16.
 
 ## How it's built
 
@@ -38,4 +47,4 @@ To connect the hosted database, create a Supabase project, run the migration in 
 
 ## Not yet
 
-Satellite map (MapLibre), sign-in and roles, pushing master lists to the hosted database, AgSense CSV import, the nightly model job, Excel and formatted PDF exports, the chase reminders, Spanish. Texting is on hold.
+Server side: pushing master lists to the hosted database, the nightly model job and the UGA ET pull (both need the farm's Supabase account). Imagery for farms outside the demo image. Everything on the PRD's "Later" list, including texting and Spanish.

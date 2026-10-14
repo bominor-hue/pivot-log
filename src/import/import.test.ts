@@ -87,3 +87,31 @@ describe('helpers', () => {
     expect(a).toBeGreaterThan(250); expect(a).toBeLessThan(260) // ~0.01° x 0.01° at 32°N is about 254 ac
   })
 })
+
+describe('AgSense weekly import', () => {
+  it('matches by alias, counts dry hours on pivots that read dry, and skips a week already imported', async () => {
+    await applyFields(await planFields(parseFieldRows([
+      { Farm: 'Hodges Farm', Field: 'Hodges #3', Pivot: 'Hodges 3', Crop: 'Peanuts', Acres: 100, 'Plant date': '2026-05-01' },
+      { Farm: 'Hodges Farm', Field: 'Hodges #7', Pivot: 'Hodges 7', Crop: 'Peanuts', Acres: 80, 'Plant date': '2026-05-01' },
+    ]), [], 2026), 'x', 'Bo')
+    for (const n of ['Hodges 3', 'Hodges 7']) { const p = (await db.pivots.where('name').equals(n).first())!; p.agsenseName = n; await db.pivots.put(p) }
+    const { planAgSense, applyAgSense } = await import('./agsense')
+    const rows = [
+      { 'Group Name': 'Hodges', Serial: '111', Alias: 'Hodges 3', 'Wet Walking Hours': '30.5', 'Dry Walking Hours': '2' },
+      { 'Group Name': 'Hodges', Serial: '222', Alias: 'Hodges 7 ', 'Wet Walking Hours': '0', 'Dry Walking Hours': '40' },
+      { 'Group Name': 'X', Serial: '333', Alias: 'Nowhere 1', 'Wet Walking Hours': '5', 'Dry Walking Hours': '0' },
+    ]
+    const plan = await planAgSense(rows, '2026-07-06', '2026-07-12')
+    expect(plan.matched).toBe(2)
+    expect(plan.items.map((i) => i.hours)).toEqual([30.5, 40, 5])
+    expect(plan.items[1].problems[0]).toMatch(/Reads dry/)
+    await applyAgSense(plan, 'week.csv', 'Bo')
+    expect(await db.entries.count()).toBe(2)
+    const again = await planAgSense(rows, '2026-07-06', '2026-07-12')
+    expect(again.items.filter((i) => i.duplicate)).toHaveLength(2)
+    await applyAgSense(again, 'week.csv', 'Bo')
+    expect(await db.entries.count()).toBe(2)
+    const h7 = (await db.pivots.where('name').equals('Hodges 7').first())!
+    expect(h7.profile.agsenseReadsDry.value).toBe('yes')
+  })
+})

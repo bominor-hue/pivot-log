@@ -36,8 +36,8 @@ export function flow(p: Pivot): { gpm: number; source: string } | null {
 export const inchesFrom = (gpm: number, hours: number, acres: number) => (gpm * hours) / (452.6 * acres)
 
 /** Hours for one pass at a percent timer. Part circles take the share of 360 they cover. */
-export function hoursPerPass(p: Pivot, pct: number): number | null {
-  const h = num(p, 'hoursPerRev100')
+export function hoursPerPass(p: Pivot, pct: number, learned: number | null = null): number | null {
+  const h = num(p, 'hoursPerRev100') ?? learned
   if (!h || !pct) return null
   const arc = num(p, 'arcDeg') ?? 360
   return (h * 100) / pct * (arc / 360)

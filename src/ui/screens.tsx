@@ -1,9 +1,11 @@
-import { useMemo, useState } from 'react'
+import { useMemo, useRef, useState } from 'react'
+import { useLiveQuery } from 'dexie-react-hooks'
 import { db, uid } from '../db'
-import { addDays } from '../model/waterBalance'
+import { growthStage, isCrop, type BalanceDay } from '../model/waterBalance'
+import type { FieldView } from '../domain/farm'
+import type { Run } from '../domain/runs'
 import { flow, hoursPerPass, inchesFrom, num } from '../domain/pivot'
-import { centroid } from '../import/boundaries'
-import { Chevron, FieldRow, PivotRow, Ring, fmtHours, fmtIn, fmtWhen, milesBetween, useGeo, useNav } from './common'
+import { Chevron, FieldRow, PivotRow, Ring, Seg, describeEntry, fmtHours, fmtIn, fmtWhen, milesBetween, useGeo, useNav } from './common'
 
 function Empty() {
   const { push } = useNav()
@@ -22,6 +24,8 @@ export function Today() {
   const running = state.pivots.filter((p) => p.running)
   const due = state.fields.filter((f) => f.advice.status === 'now' || f.advice.status === 'soon').sort((a, b) => b.advice.pctDry - a.advice.pctDry)
   const gaps = state.pivots.flatMap((p) => p.runs.filter((r) => r.issues.some((i) => !i.startsWith('No '))).map((r) => ({ p, r })))
+  const probeGaps = state.fields.filter((f) => f.probeGap)
+  const around = state.pivots.flatMap((p) => p.runs.filter((r) => r.stop && r.madeItAround != null && Date.now() - Date.parse(r.stop) < 36 * 3600000).map((r) => ({ p, r })))
   const near = useMemo(() => {
     if (!geo) return []
     return state.pivots.filter((p) => p.pivot.lat != null).map((p) => ({ p, mi: milesBetween(geo, { lat: p.pivot.lat!, lon: p.pivot.lon! }) })).sort((a, b) => a.mi - b.mi).slice(0, 6)
@@ -35,7 +39,7 @@ export function Today() {
         <div className="tiles">
           <div className="tile"><b style={{ color: 'var(--water)' }}>{running.length}</b><span>Running</span></div>
           <div className="tile"><b style={{ color: 'var(--coral)' }}>{due.filter((d) => d.advice.status === 'now').length}</b><span>Water now</span></div>
-          <div className="tile"><b style={{ color: 'var(--amber)' }}>{gaps.length}</b><span>Need a look</span></div>
+          <div className="tile"><b style={{ color: 'var(--amber)' }}>{gaps.length + probeGaps.length}</b><span>Need a look</span></div>
         </div>
         {near.length > 0 && <>
           <div className="sec">Near me</div>
@@ -43,14 +47,22 @@ export function Today() {
         </>}
         <div className="sec">Running now <small>{running.length} pivots</small></div>
         {running.length ? <div className="card">{running.map((p) => <PivotRow key={p.pivot.id} p={p} />)}</div> : <p className="note">Nothing logged as running.</p>}
+        {around.length > 0 && <>
+          <div className="sec">Made it around</div>
+          <div className="card">{around.map(({ p, r }, i) => <div key={i} className="row"><span className={`dot ${r.madeItAround ? 'd-ok' : 'd-soon'}`} /><span className="t"><b>{p.pivot.name}</b><span>{r.madeItAround ? 'Made it around' : 'Stopped part way'} · off {fmtWhen(r.stop!)}</span></span></div>)}</div>
+        </>}
         <div className="sec">Needs water <small>from the water balance</small></div>
         {due.length ? <div className="card">{due.slice(0, 12).map((v) => <FieldRow key={v.field.id} v={v} />)}</div> : <p className="note">No field is near its trigger.</p>}
-        {gaps.length > 0 && <>
+        {gaps.length + probeGaps.length > 0 && <>
           <div className="sec">Need a look</div>
           <div className="card">{gaps.slice(0, 10).map(({ p, r }, i) => (
             <button key={i} className="row" onClick={() => push({ kind: 'pivot', id: p.pivot.id })}>
               <span className="dot d-soon" /><span className="t"><b>{p.pivot.name}</b><span>{r.issues.filter((x) => !x.startsWith('No ')).join('; ')}</span></span><Chevron />
             </button>))}
+            {probeGaps.map((f) => (
+              <button key={f.field.id} className="row" onClick={() => push({ kind: 'field', id: f.field.id })}>
+                <span className="dot d-soon" /><span className="t"><b>{f.field.name}</b><span>Probe {f.probeGap!.probe.toFixed(0)}% used vs model {f.probeGap!.model.toFixed(0)}%</span></span><Chevron />
+              </button>))}
           </div>
         </>}
       </>}
@@ -59,24 +71,33 @@ export function Today() {
 }
 
 export function Log() {
-  const { state } = useNav()
+  const { state, turn } = useNav()
   const [q, setQ] = useState('')
-  const recent = [...state.entries].sort((a, b) => b.recordedAt.localeCompare(a.recordedAt)).slice(0, 40)
+  const open = state.pivots.flatMap((p) => p.runs.filter((r) => r.issues.some((i) => !i.startsWith('No '))).map((r) => ({ p, r })))
+  const recent = [...state.entries].sort((a, b) => b.recordedAt.localeCompare(a.recordedAt)).slice(0, 100)
   const name = (id: string) => state.pivots.find((p) => p.pivot.id === id)?.pivot.name ?? '?'
   const list = state.pivots.filter((p) => !q || p.pivot.name.toLowerCase().includes(q.toLowerCase()) || p.fields.some((f) => f.name.toLowerCase().includes(q.toLowerCase())))
   return (
     <div className="page">
       <h1 className="lt">Log</h1>
-      <p className="sub">Turn a pivot ON or OFF, or enter a run after the fact.</p>
+      <p className="sub">Turn a pivot on or off, answer open questions, or enter a missed run.</p>
       <input className="card" style={{ width: '100%', padding: '12px 14px', border: 0, fontSize: 16 }} placeholder="Search pivots or fields" value={q} onChange={(e) => setQ(e.target.value)} />
       <div className="sec">Pivots <small>{list.length}</small></div>
       {list.length ? <div className="card">{list.map((p) => <PivotRow key={p.pivot.id} p={p} />)}</div> : <p className="note">No pivots yet. Import fields first.</p>}
-      <div className="sec">Recent entries</div>
+      {open.length > 0 && <>
+        <div className="sec">Open questions <small>{open.length}</small></div>
+        <div className="card">{open.map(({ p, r }, i) => (
+          <div key={i} className="row"><span className="dot d-soon" /><span className="t"><b>{p.pivot.name}</b><span>{r.issues.filter((x) => !x.startsWith('No ')).join('; ')}</span></span>
+            {r.start && !r.stop ? <button className="btn off sm" onClick={() => turn(p.pivot.id, 'off')}>Log the OFF</button> : <button className="btn sm" onClick={() => turn(p.pivot.id, 'run')}>Log a past run</button>}
+          </div>))}</div>
+        <p className="note">Answering adds a new entry. If an entry was a mistake, undo it below.</p>
+      </>}
+      <div className="sec">Every entry <small>newest first</small></div>
       {recent.length ? <div className="card">{recent.map((e) => (
         <div key={e.id} className="row">
           <span className={`dot ${e.action === 'on' ? 'd-run' : e.action === 'off' ? 'd-none' : 'd-ok'}`} />
-          <span className="t"><b>{name(e.pivotId)} {e.action === 'run' ? 'past run' : e.action.toUpperCase()}</b>
-            <span>{e.action === 'run' ? `${fmtWhen(e.startAt!)} to ${fmtWhen(e.stopAt!)}` : fmtWhen(e.happenedAt)} · {e.who}{e.percentTimer ? ` · ${e.percentTimer}%` : ''}{e.synced ? '' : ' · on this phone'}</span></span>
+          <span className="t"><b>{name(e.pivotId)} {e.how === 'agsense' ? 'AgSense' : e.action === 'run' ? 'past run' : e.action === 'void' ? 'correction' : e.action === 'on' ? 'on' : 'off'}{e.action === 'on' || e.action === 'off' ? ` · ${fmtWhen(e.happenedAt)}` : ''}</b>
+            <span>{describeEntry(e)}</span><span>{e.who}{e.synced ? '' : ' · saved on this phone'}</span></span>
           {e.action !== 'void' && <VoidButton id={e.id} pivotId={e.pivotId} />}
         </div>))}</div> : <p className="note">Nothing logged yet.</p>}
       <p className="note">Entries are never edited. "Undo" adds a correction that cancels the entry, and both stay in the records.</p>
@@ -115,26 +136,62 @@ export function Fields() {
   )
 }
 
-function SeasonChart({ days }: { days: { date: string; depletionApplied: number | null; depletionRainOnly: number; taw: number; trigger: number; rain: number; appliedGross: number }[] }) {
+function SoilChart({ v }: { v: FieldView }) {
+  const days = v.days
   if (days.length < 2) return null
-  const W = 340, H = 140, n = days.length
-  const maxT = Math.max(...days.map((d) => d.taw), 0.5)
-  const x = (i: number) => (i / (n - 1)) * W
-  const y = (v: number) => (v / maxT) * (H - 20) + 4 // depletion grows downward like a tank emptying
-  const line = (k: (d: any) => number) => days.map((d, i) => `${i ? 'L' : 'M'}${x(i).toFixed(1)},${y(k(d)).toFixed(1)}`).join('')
-  const dep = (d: any) => d.depletionApplied ?? d.depletionRainOnly
+  const W = 340, H = 150, L = 34, B = 16, n = days.length
+  const x = (i: number) => L + (i / (n - 1)) * (W - L - 4)
+  const y = (pct: number) => 6 + (Math.min(100, Math.max(0, pct)) / 100) * (H - B - 6) // 0% used (full) at top
+  const pctOf = (d: BalanceDay) => (d.taw > 0 ? (100 * (d.depletionApplied ?? d.depletionRainOnly)) / d.taw : 0)
+  const line = days.map((d, i) => `${i ? 'L' : 'M'}${x(i).toFixed(1)},${y(pctOf(d)).toFixed(1)}`).join('')
+  const trig = days.map((d, i) => `${i ? 'L' : 'M'}${x(i).toFixed(1)},${y(d.taw > 0 ? (100 * d.trigger) / d.taw : 50).toFixed(1)}`).join('')
+  const idx = new Map(days.map((d, i) => [d.date, i]))
   return (
     <div className="card chart">
-      <svg viewBox={`0 0 ${W} ${H}`} role="img" aria-label="Soil water this season">
-        <path d={line((d) => d.trigger)} fill="none" stroke="var(--amber)" strokeWidth="1.5" strokeDasharray="4 3" />
-        <path d={line((d) => d.taw)} fill="none" stroke="var(--fg3)" strokeWidth="1" />
-        {days.map((d, i) => d.rain >= 0.1 ? <rect key={'r' + i} x={x(i) - 1} y={4} width={2} height={Math.min(30, d.rain * 20)} fill="var(--rain)" /> : null)}
-        {days.map((d, i) => d.appliedGross > 0.01 ? <rect key={'a' + i} x={x(i) - 1} y={4} width={2} height={Math.min(30, d.appliedGross * 20)} fill="var(--water)" opacity={0.6} /> : null)}
-        <path d={line(dep)} fill="none" stroke="var(--leaf)" strokeWidth="2.2" />
-        <text x="0" y={H - 2}>{days[0].date.slice(5)}</text><text x={W} y={H - 2} textAnchor="end">{days[n - 1].date.slice(5)}</text>
+      <svg viewBox={`0 0 ${W} ${H}`} role="img" aria-label="Soil water used this season, percent">
+        {[0, 50, 100].map((p) => <g key={p}><line x1={L} x2={W - 4} y1={y(p)} y2={y(p)} stroke="var(--sep)" /><text x={L - 4} y={y(p) + 3} textAnchor="end">{p}%</text></g>)}
+        <path d={trig} fill="none" stroke="var(--amber)" strokeWidth="1.5" strokeDasharray="4 3" />
+        <path d={line} fill="none" stroke="var(--leaf)" strokeWidth="2.2" />
+        {v.probes.filter((p) => idx.has(p.date)).map((p) => <circle key={p.id} cx={x(idx.get(p.date)!)} cy={y(p.pctUsed)} r="3.2" fill="var(--card)" stroke="var(--fg)" strokeWidth="1.5" />)}
+        <text x={L} y={H - 2}>{days[0].date.slice(5)}</text><text x={W - 4} y={H - 2} textAnchor="end">{days[n - 1].date.slice(5)}</text>
       </svg>
-      <div className="leg"><span><i style={{ background: 'var(--leaf)' }} />Soil water (top = full)</span><span><i style={{ background: 'var(--amber)' }} />Water at this line</span><span><i style={{ background: 'var(--fg3)' }} />Empty</span><span><i style={{ background: 'var(--rain)' }} />Rain</span><span><i style={{ background: 'var(--water)' }} />Irrigation</span></div>
+      <div className="leg"><span><i style={{ background: 'var(--leaf)' }} />Soil water used (model)</span><span><i style={{ background: 'var(--amber)' }} />Water at</span>{v.probes.length > 0 && <span><i style={{ background: 'var(--fg)', height: 6, width: 6, borderRadius: 3 }} />Probe</span>}</div>
     </div>
+  )
+}
+
+function SeasonChart({ days }: { days: BalanceDay[] }) {
+  if (days.length < 2) return null
+  const W = 340, H = 140, L = 34, B = 16, n = days.length
+  let r = 0, nd = 0, a = 0
+  const cum = days.map((d) => ({ r: (r += d.rain >= 0.1 ? d.rain : 0), n: (nd += d.irrRecGross), a: (a += d.appliedGross) }))
+  const max = Math.max(1, ...cum.map((c) => Math.max(c.r, c.n, c.a)))
+  const top = Math.ceil(max / 5) * 5
+  const x = (i: number) => L + (i / (n - 1)) * (W - L - 4)
+  const y = (v: number) => H - B - (v / top) * (H - B - 6)
+  const path = (k: 'r' | 'n' | 'a') => cum.map((c, i) => `${i ? 'L' : 'M'}${x(i).toFixed(1)},${y(c[k]).toFixed(1)}`).join('')
+  return (
+    <div className="card chart">
+      <svg viewBox={`0 0 ${W} ${H}`} role="img" aria-label="Rain, model need and applied water, season to date">
+        {[0, top / 2, top].map((v) => <g key={v}><line x1={L} x2={W - 4} y1={y(v)} y2={y(v)} stroke="var(--sep)" /><text x={L - 4} y={y(v) + 3} textAnchor="end">{v}</text></g>)}
+        <path d={path('r')} fill="none" stroke="var(--rain)" strokeWidth="2" />
+        <path d={path('n')} fill="none" stroke="var(--amber)" strokeWidth="2" strokeDasharray="4 3" />
+        <path d={path('a')} fill="none" stroke="var(--water)" strokeWidth="2.4" />
+        <text x={L} y={H - 2}>{days[0].date.slice(5)}</text><text x={W - 4} y={H - 2} textAnchor="end">{days[n - 1].date.slice(5)}</text>
+      </svg>
+      <div className="leg"><span><i style={{ background: 'var(--rain)' }} />Rain</span><span><i style={{ background: 'var(--amber)' }} />Model need</span><span><i style={{ background: 'var(--water)' }} />Applied</span><span>inches, season to date</span></div>
+    </div>
+  )
+}
+
+/** A label and number that opens to show where the number came from ("show me why"). */
+function Why({ label, value, why }: { label: string; value: string; why: string }) {
+  const [open, setOpen] = useState(false)
+  return (
+    <button className="why" onClick={() => setOpen(!open)} aria-expanded={open}>
+      <span className="wl">{label}</span><b>{value}</b>
+      {open && <span className="wy">{why}</span>}
+    </button>
   )
 }
 
@@ -145,40 +202,69 @@ export function FieldDetail({ id }: { id: string }) {
   const pv = v.pivot ? state.pivots.find((p) => p.pivot.id === v.pivot!.id) : null
   const last = v.days.at(-1)
   const a = v.advice
-  const action = a.status === 'now' ? `Water now: put on about ${a.recommendGrossIn.toFixed(2)} in.` : a.status === 'soon' && a.daysToTrigger !== null ? `Water by ${new Date(addDays(state.asOf, a.daysToTrigger) + 'T12:00:00').toLocaleDateString('en-US', { weekday: 'long' })}.` : a.line + '.'
-  const pct = pv ? (() => {
-    const f = flow(pv.pivot), h = num(pv.pivot, 'hoursPerRev100')
-    if (!f || !h || !pv.acres || !a.recommendGrossIn) return null
-    // timer that puts the recommended inches on in one pass
-    const inchesAt100 = inchesFrom(f.gpm, h, pv.acres)
-    return Math.min(100, Math.max(5, Math.round((100 * inchesAt100) / a.recommendGrossIn)))
-  })() : null
+  const crop = v.season && isCrop(v.season.crop) ? v.season.crop : null
+  const stage = crop && last ? growthStage(crop, last.dap) : null
+  const dep = last ? last.depletionApplied ?? last.depletionRainOnly : 0
+  const f = pv ? flow(pv.pivot) : null
+  const timer = pv && f && pv.lapHours100 && pv.acres && a.recommendGrossIn
+    ? Math.min(100, Math.max(5, Math.round((100 * inchesFrom(f.gpm, pv.lapHours100.hours * ((num(pv.pivot, 'arcDeg') ?? 360) / 360), pv.acres)) / a.recommendGrossIn))) : null
+  const runs = pv ? [...pv.runs].reverse().slice(0, 3) : []
   return (
     <div className="page">
       <div className="card hero">
         <Ring pct={a.pctDry} status={a.status} size={64} />
-        <div><h2>{v.field.name}</h2><p className="act">{action}</p>
-          <p>{[v.season?.crop, v.season ? `${v.season.acres} ac` : null, last ? `day ${last.dap} after planting` : null, v.farm?.name].filter(Boolean).join(' · ')}</p></div>
+        <div><h2>{v.field.name}</h2><p className="act">{a.line}{a.status === 'now' || a.status === 'soon' ? `, about ${a.recommendGrossIn.toFixed(2)} in` : ''}</p>
+          <p>{[v.season?.crop, v.season ? `${v.season.acres} ac` : null, v.farm?.name].filter(Boolean).join(' · ')}</p></div>
       </div>
       {pv && (pv.running
-        ? <button className="cta off" onClick={() => turn(pv.pivot.id, 'off')}>Turn OFF {pv.pivot.name}</button>
-        : <button className="cta" onClick={() => turn(pv.pivot.id, 'on')}>Turn ON {pv.pivot.name}{pct ? ` at ${pct}%` : ''}</button>)}
+        ? <button className="cta off" onClick={() => turn(pv.pivot.id, 'off')}>Turn off {pv.pivot.name}</button>
+        : <button className="cta" onClick={() => turn(pv.pivot.id, 'on')}>Turn on {pv.pivot.name}{timer ? ` at ${timer}%` : ''}</button>)}
+      {v.probeGap && <p className="calc warn">Probe reads {v.probeGap.probe.toFixed(0)}% used on {v.probeGap.date}; the model says {v.probeGap.model.toFixed(0)}%. Check the probe and the field.</p>}
+      {stage && last && <div className="card stg" style={{ marginTop: 10 }}>
+        <span className="chip">{last.dap}</span>
+        <div><b>{stage.name}</b><span>{stage.tip} Day {last.dap} after planting; stage is approximate.</span></div>
+      </div>}
+      {last && <>
+        <div className="sec">Show me why <small>tap a number</small></div>
+        <div className="card">
+          <Why label="Soil water used" value={`${a.pctDry.toFixed(0)}%`} why={`${dep.toFixed(2)} in used of the ${last.taw.toFixed(2)} in this soil holds in today's root zone (SSURGO, ${v.pivot?.soil?.split(',')[0] ?? 'soil'}). Each day: yesterday + crop use − rain − irrigation.`} />
+          <Why label="Water at" value={`${((100 * last.trigger) / last.taw).toFixed(0)}% used`} why={crop === 'Corn' && last.dap >= 50 && last.dap <= 95 ? 'Corn at peak (50 to 95 days) is watered at 45% used; the rest of the season at 50%.' : 'Fields are watered when half the soil water is used (UGA and FAO-56 practice).'} />
+          <Why label="Crop use" value={`${a.cropUsePerDay.toFixed(2)} in/day`} why={`Average of the last 7 days: reference ET (${state.weatherSource || 'weather'}) × crop coefficient ${last.kc.toFixed(2)} for day ${last.dap}.`} />
+          <Why label="Days until water is needed" value={a.daysToTrigger === null ? '–' : `${a.daysToTrigger}`} why={`${Math.max(0, last.trigger - dep).toFixed(2)} in of room before the water-at line ÷ ${a.cropUsePerDay.toFixed(2)} in/day. A lap takes about ${a.lapDays.toFixed(1)} days${pv?.lapHours100 ? ` (${pv.lapHours100.source})` : ' (no lap time yet; 1 day assumed)'}, so ${a.startInDays === 0 ? 'start today' : a.startInDays === null ? 'no start date yet' : `start in ${a.startInDays} day${a.startInDays > 1 ? 's' : ''}`}.`} />
+          <Why label="This week" value={a.weekGrossIn > 0.05 ? `about ${a.weekGrossIn.toFixed(2)} in` : 'none needed'} why={`Soil water used now (${dep.toFixed(2)} in) + 7 days of crop use (${(7 * a.cropUsePerDay).toFixed(2)} in) − the water-at line (${last.trigger.toFixed(2)} in), ÷ 85% efficiency. Forecast rain isn't counted yet.`} />
+          <Why label="Rain this season" value={fmtIn(v.rainIn, 1)} why="NOAA MRMS radar and gauge rain, averaged over the 3 by 3 km around the pivot center. Days under 0.10 in don't count." />
+          <Why label="Applied this season" value={fmtIn(v.appliedIn, 1)} why={`Logged runs on ${v.pivot?.name ?? 'the pivot'}: gpm × hours ÷ (452.6 × acres)${f ? `, using ${f.gpm} gpm (${f.source})` : ''}. AgSense weekly totals are spread over their week.`} />
+          <Why label="Model need this season" value={fmtIn(v.needIn, 1)} why="What the model would have put on: refill when the field reaches the water-at line, up to 1 in (0.75 in peanuts) at a time, ÷ 85% efficiency." />
+        </div>
+      </>}
+      <div className="sec">Soil water</div>
+      <SoilChart v={v} />
       <div className="sec">Season so far</div>
       <SeasonChart days={v.days} />
-      <div className="card kv" style={{ marginTop: 10 }}>
-        <span>Rain</span><b>{fmtIn(v.rainIn, 1)}</b>
-        <span>Irrigation logged</span><b>{fmtIn(v.appliedIn, 1)}</b>
-        <span>Model need so far</span><b>{fmtIn(v.needIn, 1)}</b>
-        <span>Soil water used</span><b>{last ? `${((last.depletionApplied ?? last.depletionRainOnly)).toFixed(2)} of ${last.taw.toFixed(2)} in` : '–'}</b>
-        <span>Planted</span><b>{v.season?.plantDate ?? '–'}</b>
-        <span>Soil</span><b style={{ maxWidth: 220, whiteSpace: 'normal' }}>{v.pivot?.soil?.split(',')[0] ?? '–'}</b>
-        <span>FSN</span><b>{v.field.fsn ?? '–'}</b>
-      </div>
-      {pv && <><div className="sec">Pivot</div><div className="card"><button className="row" onClick={() => push({ kind: 'pivot', id: pv.pivot.id })}><span className="t"><b>{pv.pivot.name}</b><span>{pv.running ? 'Running now' : pv.lastRun ? `Last off ${fmtWhen(pv.lastRun.stop!)}` : 'No runs logged'}</span></span><Chevron /></button></div></>}
-      <p className="foot">Water balance as of {state.asOf}. Rain: NOAA radar by pivot. ET: {state.weatherSource || 'none loaded'}. "Irrigation logged" counts only runs in Pivot Log.</p>
+      {pv && <>
+        <div className="sec">Last runs</div>
+        <div className="card">
+          {runs.length ? runs.map((r, i) => <RunRow key={i} r={r} />) : <div className="row"><span className="t"><span>No runs logged yet.</span></span></div>}
+          <button className="row" onClick={() => push({ kind: 'pivot', id: pv.pivot.id })}><span className="t"><b style={{ color: 'var(--water)' }}>{pv.pivot.name}: all runs and pivot profile</b></span><Chevron /></button>
+        </div>
+      </>}
+      <p className="foot">Water balance as of {state.asOf}. Planted {v.season?.plantDate ?? '–'}. FSN {v.field.fsn ?? '–'}. Rain: NOAA MRMS. ET: {state.weatherSource || 'none loaded'}.</p>
     </div>
   )
 }
+
+export function RunRow({ r }: { r: Run }) {
+  return (
+    <div className="row">
+      <span className={`dot ${!r.stop ? 'd-run' : r.issues.some((x) => !x.startsWith('No ')) ? 'd-soon' : 'd-ok'}`} />
+      <span className="t"><b>{r.periodHours != null ? `AgSense week to ${fmtWhen(r.stop!)}` : `${r.start ? fmtWhen(r.start) : 'Start unknown'} → ${r.stop ? fmtWhen(r.stop) : 'running'}`}</b>
+        <span>{[r.hours != null ? fmtHours(r.hours) : null, r.direction ? cap(r.direction) : null, r.percentTimer ? `${r.percentTimer}%` : null,
+          r.madeItAround === true ? 'made it around' : r.madeItAround === false ? 'stopped part way' : null, ...r.issues].filter(Boolean).join(' · ')}</span></span>
+      <span className="v">{r.inches != null ? fmtIn(r.inches) : ''}</span>
+    </div>
+  )
+}
+const cap = (s: string) => s[0].toUpperCase() + s.slice(1)
 
 const PROFILE_LABELS: [string, string][] = [
   ['irrigatedAcres', 'Irrigated acres'], ['flowGpm', 'Design flow (gpm)'], ['measuredGpm', 'Measured flow (gpm)'], ['agsenseGpm', 'AgSense gpm (typed in)'],
@@ -191,7 +277,7 @@ export function PivotDetail({ id }: { id: string }) {
   const pv = state.pivots.find((p) => p.pivot.id === id)
   if (!pv) return <div className="page"><p className="note">Pivot not found.</p></div>
   const f = flow(pv.pivot)
-  const pass100 = hoursPerPass(pv.pivot, 100)
+  const pass100 = hoursPerPass(pv.pivot, 100, pv.lapHours100?.hours ?? null)
   return (
     <div className="page">
       <h1 className="lt">{pv.pivot.name}</h1>
@@ -199,16 +285,11 @@ export function PivotDetail({ id }: { id: string }) {
       {pv.running ? <button className="cta off" onClick={() => turn(id, 'off')}>Turn OFF</button> : <button className="cta" onClick={() => turn(id, 'on')}>Turn ON</button>}
       <button className="cta sec2" onClick={() => turn(id, 'run')}>Log a past run</button>
       <div className="sec">Runs <small>{pv.runs.length}</small></div>
-      {pv.runs.length ? <div className="card">{[...pv.runs].reverse().slice(0, 30).map((r, i) => (
-        <div key={i} className="row">
-          <span className={`dot ${!r.stop ? 'd-run' : r.issues.some((x) => !x.startsWith('No ')) ? 'd-soon' : 'd-ok'}`} />
-          <span className="t"><b>{r.start ? fmtWhen(r.start) : 'Start unknown'} → {r.stop ? fmtWhen(r.stop) : 'running'}</b>
-            <span>{[r.hours != null ? fmtHours(r.hours) : null, r.percentTimer ? `${r.percentTimer}%` : null, r.direction, r.madeItAround === true ? 'made it around' : r.madeItAround === false ? 'did not make it around' : null, ...r.issues].filter(Boolean).join(' · ')}</span></span>
-          <span className="v">{r.inches != null ? fmtIn(r.inches) : ''}</span>
-        </div>))}</div> : <p className="note">No runs logged yet.</p>}
+      {pv.runs.length ? <div className="card">{[...pv.runs].reverse().slice(0, 30).map((r, i) => <RunRow key={i} r={r} />)}</div> : <p className="note">No runs logged yet.</p>}
       <div className="sec">Pivot profile</div>
       <div className="card kv">
         {PROFILE_LABELS.filter(([k]) => pv.pivot.profile[k]).flatMap(([k, l]) => [<span key={k + 'l'}>{l}</span>, <b key={k + 'v'}>{String(pv.pivot.profile[k].value)}<small>{pv.pivot.profile[k].source}</small></b>])}
+        <span>Hours per lap at 100%</span><b>{pv.lapHours100 ? pv.lapHours100.hours.toFixed(1) : '–'}<small>{pv.lapHours100?.source ?? 'learned once a lap is marked "made it around"'}</small></b>
         <span>Acres used for inches</span><b>{pv.acres ? pv.acres.toFixed(1) : '–'}</b>
         <span>Inches per pass at 100%</span><b>{f && pass100 && pv.acres ? inchesFrom(f.gpm, pass100, pv.acres).toFixed(2) : '–'}</b>
       </div>
@@ -217,40 +298,72 @@ export function PivotDetail({ id }: { id: string }) {
   )
 }
 
+type Layer = 'water' | 'rain' | 'crop'
+const STATUS_COLOR: Record<string, string> = { now: 'var(--coral)', soon: 'var(--amber)', ok: 'var(--leaf)', none: 'var(--fg3)', off: 'var(--fg3)' }
+const CROP_COLOR: Record<string, string> = { Corn: 'var(--corn)', Cotton: 'var(--cotton)', Peanuts: 'var(--peanut)' }
+
 export function MapView() {
   const { state, push } = useNav()
-  const shapes = state.fields.filter((f) => f.field.boundary)
+  const [layer, setLayer] = useState<Layer>('water')
+  const [farm, setFarm] = useState('')
+  const [view, setView] = useState<{ x: number; y: number; k: number }>({ x: 0, y: 0, k: 1 })
+  const drag = useRef<{ x: number; y: number; vx: number; vy: number } | null>(null)
+  const imagery = useLiveQuery(() => db.settings.get('imagery'), [])?.value as { url: string; bounds: [number, number, number, number]; label: string } | undefined
+  const shapes = state.fields.filter((f) => f.field.boundary && (!farm || f.farm?.id === farm))
   const box = useMemo(() => {
     let x0 = Infinity, x1 = -Infinity, y0 = Infinity, y1 = -Infinity
     const walk = (c: any) => { if (typeof c[0] === 'number') { x0 = Math.min(x0, c[0]); x1 = Math.max(x1, c[0]); y0 = Math.min(y0, c[1]); y1 = Math.max(y1, c[1]) } else c.forEach(walk) }
     shapes.forEach((s) => walk(s.field.boundary!.coordinates))
-    return { x0, x1, y0, y1 }
+    const px = (x1 - x0) * 0.04, py = (y1 - y0) * 0.04
+    return { x0: x0 - px, x1: x1 + px, y0: y0 - py, y1: y1 + py }
   }, [shapes])
-  if (!shapes.length) return <div className="page"><h1 className="lt">Map</h1><Empty /></div>
+  if (!state.fields.some((f) => f.field.boundary)) return <div className="page"><h1 className="lt">Map</h1><Empty /></div>
   const k = Math.cos(((box.y0 + box.y1) / 2) * Math.PI / 180)
   const W = 1000, s = W / ((box.x1 - box.x0) * k), H = (box.y1 - box.y0) * s
-  const pt = (c: number[]) => `${((c[0] - box.x0) * k * s).toFixed(1)},${((box.y1 - c[1]) * s).toFixed(1)}`
+  const X = (lon: number) => (lon - box.x0) * k * s, Y = (lat: number) => (box.y1 - lat) * s
+  const pt = (c: number[]) => `${X(c[0]).toFixed(1)},${Y(c[1]).toFixed(1)}`
   const d = (g: any) => (g.type === 'Polygon' ? [g.coordinates] : g.coordinates).map((p: number[][][]) => p.map((r) => 'M' + r.map(pt).join('L') + 'Z').join('')).join('')
-  const color: Record<string, string> = { now: 'var(--coral)', soon: 'var(--amber)', ok: 'var(--leaf)', none: 'var(--fg3)', off: 'var(--fg3)' }
+  const rain7 = (v: FieldView) => v.days.slice(-7).reduce((a, x) => a + x.rain, 0)
+  const rainColor = (r: number) => `color-mix(in srgb, var(--rain) ${Math.min(100, 15 + r * 40).toFixed(0)}%, var(--card))`
+  const fill = (v: FieldView) => layer === 'water' ? STATUS_COLOR[v.advice.status] : layer === 'rain' ? rainColor(rain7(v)) : CROP_COLOR[v.season?.crop ?? ''] ?? 'var(--fg3)'
+  const vw = W / view.k, vh = H / view.k
+  const pivots = state.pivots.filter((p) => p.pivot.lat != null && (!farm || p.farm?.id === farm))
+  const mPerUnit = 111320 / s // metres per SVG unit (north-south)
   return (
     <div className="page wide">
       <h1 className="lt">Map</h1>
-      <p className="sub">Tap a field. Blue outline = pivot running.</p>
-      <div className="map">
-        <svg viewBox={`-10 -10 ${W + 20} ${H + 20}`}>
-          {shapes.map((v) => {
-            const run = v.pivot && state.pivots.find((p) => p.pivot.id === v.pivot!.id)?.running
-            const [cx, cy] = centroid(v.field.boundary!)
-            return <g key={v.field.id} onClick={() => push({ kind: 'field', id: v.field.id })}>
-              <path d={d(v.field.boundary)} fill={color[v.advice.status]} fillOpacity={0.75} style={run ? { stroke: 'var(--water)', strokeWidth: 3 } : undefined}><title>{v.field.name}: {v.advice.line}</title></path>
-              <text x={pt([cx, cy]).split(',')[0]} y={pt([cx, cy]).split(',')[1]} textAnchor="middle" style={{ font: '600 9px var(--text)', fill: 'var(--fg)', pointerEvents: 'none' }}>{v.field.name.replace(/ Farm$/, '')}</text>
+      <div className="filters">
+        <Seg value={layer} options={[['water', 'Soil water'], ['rain', 'Rain, 7 days'], ['crop', 'Crop']]} onChange={setLayer} />
+        <select value={farm} onChange={(e) => { setFarm(e.target.value); setView({ x: 0, y: 0, k: 1 }) }} aria-label="Farm"><option value="">All farms</option>{state.farms.map((f) => <option key={f.id} value={f.id}>{f.name}</option>)}</select>
+        <button className="btn" onClick={() => setView((v) => ({ ...v, k: Math.min(12, v.k * 1.6) }))} aria-label="Zoom in">+</button>
+        <button className="btn" onClick={() => setView((v) => ({ ...v, k: Math.max(1, v.k / 1.6) }))} aria-label="Zoom out">−</button>
+      </div>
+      <div className="map"
+        onPointerDown={(e) => { drag.current = { x: e.clientX, y: e.clientY, vx: view.x, vy: view.y } }}
+        onPointerMove={(e) => { if (!drag.current) return; const r = (e.currentTarget as HTMLElement).getBoundingClientRect(); const f = vw / r.width; setView((v) => ({ ...v, x: drag.current!.vx - (e.clientX - drag.current!.x) * f, y: drag.current!.vy - (e.clientY - drag.current!.y) * f })) }}
+        onPointerUp={() => { drag.current = null }} onPointerLeave={() => { drag.current = null }}>
+        <svg viewBox={`${(W - vw) / 2 + view.x} ${(H - vh) / 2 + view.y} ${vw} ${vh}`}>
+          {imagery && <image href={imagery.url} x={X(imagery.bounds[0])} y={Y(imagery.bounds[3])} width={X(imagery.bounds[2]) - X(imagery.bounds[0])} height={Y(imagery.bounds[1]) - Y(imagery.bounds[3])} preserveAspectRatio="none" />}
+          {shapes.map((v) => (
+            <path key={v.field.id} d={d(v.field.boundary)} fill={fill(v)} fillOpacity={imagery ? 0.55 : 0.8} onClick={() => push({ kind: 'field', id: v.field.id })}><title>{v.field.name}: {v.advice.line}</title></path>
+          ))}
+          {pivots.map((p) => {
+            const ac = p.acres ?? 0
+            const r = ac ? Math.sqrt((ac * 4046.86) / Math.PI) / mPerUnit : 0
+            return <g key={p.pivot.id} style={{ pointerEvents: 'none' }}>
+              {r > 0 && <circle cx={X(p.pivot.lon!)} cy={Y(p.pivot.lat!)} r={r} fill="none" stroke={p.running ? 'var(--water)' : 'rgba(255,255,255,.75)'} strokeWidth={p.running ? 3 : 1} vectorEffect="non-scaling-stroke" strokeDasharray={p.running ? undefined : '3 3'} />}
+              {(view.k >= 2 || farm) && <text x={X(p.pivot.lon!)} y={Y(p.pivot.lat!)} textAnchor="middle" dominantBaseline="middle" style={{ font: `600 ${9 / Math.sqrt(view.k)}px var(--text)`, fill: '#fff', paintOrder: 'stroke', stroke: 'rgba(0,0,0,.55)', strokeWidth: 2 / Math.sqrt(view.k) }}>{p.pivot.name}</text>}
             </g>
           })}
         </svg>
       </div>
-      <div className="leg" style={{ margin: '10px 4px' }}><span><i style={{ background: 'var(--coral)' }} />Water now</span><span><i style={{ background: 'var(--amber)' }} />Water soon</span><span><i style={{ background: 'var(--leaf)' }} />OK</span><span><i style={{ background: 'var(--fg3)' }} />Not modeled</span></div>
-      <p className="note">Satellite imagery and zoom come with the map library in the next step.</p>
+      <div className="leg" style={{ margin: '10px 4px' }}>
+        {layer === 'water' && <><span><i style={{ background: 'var(--coral)' }} />Turn on today</span><span><i style={{ background: 'var(--amber)' }} />Turn on soon</span><span><i style={{ background: 'var(--leaf)' }} />Hold</span><span><i style={{ background: 'var(--fg3)' }} />Not modeled</span></>}
+        {layer === 'rain' && <><span><i style={{ background: rainColor(0) }} />0 in</span><span><i style={{ background: rainColor(1) }} />1 in</span><span><i style={{ background: rainColor(2) }} />2 in or more</span></>}
+        {layer === 'crop' && Object.entries(CROP_COLOR).map(([c, col]) => <span key={c}><i style={{ background: col }} />{c}</span>)}
+        <span><i style={{ background: 'var(--water)' }} />Running pivot</span>
+      </div>
+      <p className="note">Tap a field to open it. Drag to move, + and − to zoom; pivot names show when zoomed in or on one farm. {imagery ? `Imagery: ${imagery.label}.` : 'No satellite image loaded for this farm yet.'}</p>
     </div>
   )
 }
-

@@ -35,10 +35,21 @@ describe('water balance matches the Python model', () => {
 })
 
 describe('advice', () => {
+  const day = (dep: number) => ({ date: '2026-07-01', dap: 60, kc: 1, etc: 0.2, rain: 0, taw: 2, trigger: 1, depletionRec: 0, irrRecGross: 0, depletionRainOnly: dep, appliedGross: 0, depletionApplied: null })
+  it('starts early enough for the lap to get around', () => {
+    // 0.6 in of room at 0.2 in/day = 3 days to the line; a 2-day lap means start in 1 day
+    const a = advise([day(0.4)], 'Cotton', 48)
+    expect(a.daysToTrigger).toBe(3)
+    expect(a.startInDays).toBe(1)
+    expect(a.status).toBe('soon')
+    expect(a.weekGrossIn).toBeCloseTo((0.4 + 1.4 - 1) / 0.85)
+    expect(advise([day(0.1)], 'Cotton', 24).line).toBe('Hold until Saturday')
+  })
   it('says water now when past the trigger', () => {
     const a = advise([{ date: '2026-07-01', dap: 60, kc: 1, etc: 0.25, rain: 0, taw: 2, trigger: 0.9, depletionRec: 0, irrRecGross: 0,
       depletionRainOnly: 1.2, appliedGross: 0, depletionApplied: null }], 'Corn')
     expect(a.status).toBe('now')
+    expect(a.line).toBe('Turn on today')
     expect(a.recommendGrossIn).toBeCloseTo(1.0 / 0.85)
   })
 })

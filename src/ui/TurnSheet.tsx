@@ -1,6 +1,7 @@
 import { useMemo, useState } from 'react'
 import { db, uid, type Entry, type PlannedStop } from '../db'
 import { flow, hoursPerPass, inchesFrom } from '../domain/pivot'
+import { stopHours } from '../domain/runs'
 import { Seg, Sheet, fmtHours, fmtWhen, hoursSince, useNav } from './common'
 
 const localInput = (d = new Date()) => new Date(d.getTime() - d.getTimezoneOffset() * 60000).toISOString().slice(0, 16)
@@ -24,15 +25,9 @@ export function TurnSheet({ pivotId, mode, onClose }: { pivotId: string; mode: '
   const [saving, setSaving] = useState(false)
 
   const f = flow(pv.pivot)
-  const pass = hoursPerPass(pv.pivot, pct)
+  const pass = hoursPerPass(pv.pivot, pct, pv.lapHours100?.hours ?? null)
   const perPass = pass && f && pv.acres ? inchesFrom(f.gpm, pass, pv.acres) : null
-  let toStop: number | null = null
-  if (stop === 'lap') toStop = pass
-  else if (stop === 'position' && pass && startDeg !== '' && stopDeg !== '') {
-    const a = Number(startDeg), b = Number(stopDeg)
-    const deg = direction === 'forward' ? (b - a + 360) % 360 : (a - b + 360) % 360
-    toStop = (pass * (deg || 360)) / 360
-  }
+  const toStop = stopHours({ plannedStop: stop, direction, startDeg: startDeg === '' ? null : Number(startDeg), stopDeg: stopDeg === '' ? null : Number(stopDeg) }, pass)
   const startMs = when === 'now' ? Date.now() : Date.parse(at)
   const running = pv.running
   const offHours = running ? (when === 'now' ? hoursSince(running.start!) : (Date.parse(at) - Date.parse(running.start!)) / 3600000) : null
@@ -56,11 +51,13 @@ export function TurnSheet({ pivotId, mode, onClose }: { pivotId: string; mode: '
     if (mode === 'run') { base.startAt = new Date(startAt).toISOString(); base.stopAt = new Date(at).toISOString(); base.happenedAt = base.stopAt; base.how = 'office' }
     if (mode === 'run' && Date.parse(base.stopAt!) <= Date.parse(base.startAt!)) { setSaving(false); toast('Stop must be after start'); return }
     await db.entries.add(base)
-    toast(mode === 'on' ? `${pv.pivot.name} ON` : mode === 'off' ? `${pv.pivot.name} OFF` : 'Run saved')
+    // Ask once for notifications so the lap reminder can reach the lock screen while the app is open.
+    if (mode === 'on' && 'Notification' in window && Notification.permission === 'default') Notification.requestPermission().catch(() => {})
+    toast(mode === 'on' ? `${pv.pivot.name} on` : mode === 'off' ? `${pv.pivot.name} off` : 'Run saved')
     onClose()
   }
 
-  const title = mode === 'on' ? `Turn ON · ${pv.pivot.name}` : mode === 'off' ? `Turn OFF · ${pv.pivot.name}` : `Log a past run · ${pv.pivot.name}`
+  const title = mode === 'on' ? `Turn on · ${pv.pivot.name}` : mode === 'off' ? `Turn off · ${pv.pivot.name}` : `Log a past run · ${pv.pivot.name}`
   return (
     <Sheet onClose={onClose}>
       <h2>{title}</h2>
@@ -82,13 +79,13 @@ export function TurnSheet({ pivotId, mode, onClose }: { pivotId: string; mode: '
           </>}
           <div className="row"><label>End gun</label><Seg value={endGun ? 'y' : 'n'} options={[['n', 'Off'], ['y', 'On']]} onChange={(v) => setEndGun(v === 'y')} /></div>
         </>}
-        {mode !== 'on' && <div className="row"><label>Made it around?</label><Seg value={around === null ? '' : around ? 'y' : 'n'} options={[['y', 'Yes'], ['n', 'No']]} onChange={(v) => setAround(v === 'y')} /></div>}
+        {mode !== 'on' && <div className="row"><label>Made it around?</label><Seg value={around === null ? '' : around ? 'y' : 'n'} options={[['y', 'Made it around'], ['n', 'Stopped part way']]} onChange={(v) => setAround(v === 'y')} /></div>}
         <div className="row"><label>Note</label><input value={note} onChange={(e) => setNote(e.target.value)} placeholder="Optional" /></div>
       </div>
 
       {mode === 'on' && <div className="calc">
-        {perPass !== null ? <>Gives about <b>{perPass.toFixed(2)} in</b> per pass. </> : null}
-        {pass ? <>A pass takes about <b>{fmtHours(pass)}</b>. </> : <span className="warn">Add hours per rev at 100% to this pivot to get pass times. </span>}
+        {perPass !== null ? <>Puts on about <b>{perPass.toFixed(2)} in</b> per lap. </> : null}
+        {pass ? <>A lap takes about <b>{fmtHours(pass)}</b>{pv.lapHours100 && !pv.pivot.profile.hoursPerRev100 ? ' (learned from past laps)' : ''}. </> : <span className="warn">No lap time yet. Mark "made it around" when it does, and the app learns it. </span>}
         {toStop ? <>Should stop about <b>{fmtWhen(new Date(startMs + toStop * 3600000).toISOString())}</b>.</> : null}
         {!f && <div className="warn">No flow rate for this pivot yet, so inches can't be worked out.</div>}
       </div>}
@@ -99,7 +96,7 @@ export function TurnSheet({ pivotId, mode, onClose }: { pivotId: string; mode: '
       {mode === 'off' && !running && <div className="calc warn">No ON logged for this pivot. The OFF will be saved and listed as a gap to fill.</div>}
 
       <button className={`cta ${mode === 'off' ? 'off' : ''}`} disabled={saving} onClick={save}>
-        {mode === 'on' ? (when === 'now' ? 'Turn ON now' : 'Save ON') : mode === 'off' ? (when === 'now' ? 'Turn OFF now' : 'Save OFF') : 'Save run'}
+        {mode === 'on' ? (when === 'now' ? 'Turn on now' : 'Save start') : mode === 'off' ? (when === 'now' ? 'Turn off now' : 'Save stop') : 'Save run'}
       </button>
       <button className="cta sec2" onClick={onClose}>Cancel</button>
     </Sheet>

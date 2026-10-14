@@ -104,7 +104,8 @@ h1.lt{font-size:34px;line-height:1.1;letter-spacing:-.02em;margin:14px 0 2px;fon
 /* Map */
 .map{background:var(--land);border-radius:16px;overflow:hidden;touch-action:none}
 .map svg{display:block;width:100%;height:auto}
-.map path{stroke:var(--card);stroke-width:.6;vector-effect:non-scaling-stroke;cursor:pointer}
+.map path{stroke:rgba(255,255,255,.85);stroke-width:1;vector-effect:non-scaling-stroke;cursor:pointer}
+.map{cursor:grab;user-select:none}
 
 /* Reports */
 .filters{display:flex;flex-wrap:wrap;gap:8px;margin:0 0 12px}
@@ -125,3 +126,17 @@ tfoot td{font-weight:700;border-top:1px solid var(--fg3);border-bottom:0}
   .tbl{overflow:visible}
   table{font-size:10px}
 }
+.why{display:grid;grid-template-columns:1fr auto;gap:2px 12px;width:100%;text-align:left;padding:12px 14px;position:relative}
+.why+.why::before{content:"";position:absolute;top:0;left:14px;right:0;border-top:.5px solid var(--sep)}
+.why .wl{font-size:15px;text-decoration:underline dotted var(--fg3);text-underline-offset:3px}
+.why b{font-weight:600;font-size:15px;text-align:right}
+.why .wy{grid-column:1/-1;color:var(--fg2);font-size:13.5px;line-height:1.4;margin-top:4px}
+.stg{display:flex;gap:12px;align-items:center;padding:12px 14px}
+.stg .chip{flex:none;width:42px;height:42px;border-radius:50%;display:grid;place-items:center;font:700 12.5px var(--round);background:color-mix(in srgb,var(--leaf) 20%,transparent);color:color-mix(in srgb,var(--leaf) 60%,var(--fg))}
+.stg b{display:block;font-size:15.5px}.stg span{display:block;color:var(--fg2);font-size:13.5px;margin-top:1px}
+.chart text{fill:var(--fg3)}
+.chipbtn{display:inline-flex;background:var(--card);border-radius:99px;overflow:hidden;font-size:14px}
+.chipbtn button{padding:7px 12px;color:var(--water);font-weight:600}
+.chipbtn button+button{padding:7px 10px 7px 4px;color:var(--fg3)}
+.chk{display:inline-flex;align-items:center;gap:6px;font-size:14px;background:var(--fill);border-radius:8px;padding:5px 10px}
+tr.sub td{font-weight:600;background:var(--fill)}
