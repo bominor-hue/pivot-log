@@ -1,0 +1,2 @@
+# Supabase CLI settings. The farm's project is linked by the GitHub "Database" job (project ref in its secrets).
+project_id = "pivot-log"
