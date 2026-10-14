@@ -44,6 +44,13 @@ export async function emailLink(email: string): Promise<string | null> {
   return error ? error.message : null
 }
 
+/** Office: the 6-digit code from the same email. An iPhone home-screen app can't receive the link's sign-in, so the code is the reliable way. */
+export async function emailCode(email: string, code: string): Promise<string | null> {
+  if (!supabase) return 'No hosted database set up'
+  const { error } = await supabase.auth.verifyOtp({ email: email.trim(), token: code.trim(), type: 'email' })
+  return error ? error.message : null
+}
+
 /** Crew phone: the shared crew login. */
 export async function crewLogin(email: string, password: string): Promise<string | null> {
   if (!supabase) return 'No hosted database set up'
