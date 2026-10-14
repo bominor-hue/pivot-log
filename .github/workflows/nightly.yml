@@ -1,0 +1,33 @@
+# Every morning: radar rain for each pivot into the farm database (jobs/nightly_rain.py).
+# Can also be run by hand from the Actions tab ("Run workflow"), with optional dates to backfill.
+# Needs repository secrets (Settings > Secrets and variables > Actions):
+#   SUPABASE_PROJECT_REF   already set for the Database job
+#   SUPABASE_SERVICE_KEY   Supabase > Project Settings > API Keys > secret key (never paste it anywhere else)
+name: Nightly
+on:
+  schedule:
+    - cron: '30 14 * * *' # 9:30-10:30 am Georgia time, after NOAA posts the 7 am rain total
+  workflow_dispatch:
+    inputs:
+      start: { description: 'Backfill from (YYYY-MM-DD), blank for the last 3 days', required: false }
+      end: { description: 'Backfill to (YYYY-MM-DD), blank for yesterday', required: false }
+jobs:
+  rain:
+    runs-on: ubuntu-latest
+    env:
+      SUPABASE_URL: https://${{ secrets.SUPABASE_PROJECT_REF }}.supabase.co
+      SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: pip install numpy pygrib
+      - env:
+          START: ${{ inputs.start }}
+          END: ${{ inputs.end }}
+        run: |
+          args=()
+          [ -n "$START" ] && args+=(--start "$START")
+          [ -n "$END" ] && args+=(--end "$END")
+          python3 jobs/nightly_rain.py "${args[@]}"
