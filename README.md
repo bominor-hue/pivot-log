@@ -47,6 +47,7 @@ To connect the hosted database:
 3. Netlify: connect this repo; set `VITE_SUPABASE_URL` and `VITE_SUPABASE_ANON_KEY` in its environment variables (`netlify.toml` has the build).
 4. In the app, Settings > Farm account: the office signs in by email link first (that login becomes the office); crew phones sign in with the crew login. Office devices send the master lists; every device sends entries and receives everyone's.
 5. Nightly rain: add repo secret `SUPABASE_SERVICE_KEY` (Supabase > Project Settings > API Keys > secret key). The **Nightly** workflow then writes NOAA MRMS radar rain for every pivot with a location (`jobs/nightly_rain.py`) and an estimated FAO-56 ETo from NOAA GHCN Plains readings (`jobs/nightly_eto.py`, same method as the 2026 model) each morning; run it by hand with a start date to backfill. Office-entered rain and station ETo are never overwritten.
+6. Lap reminders on locked phones: signed in as the office, Settings > Lap reminders > Make reminder keys. Add the two keys plus `SUPABASE_SERVICE_KEY` to Netlify's environment variables and redeploy. `netlify/functions/reminders.mts` then runs every minute and pushes due reminders (`supabase/migrations/0002_reminders.sql`) to every phone that turned them on. iPhones need the app on the Home Screen.
 
 `npm test` also runs the migration on an in-memory Postgres and checks who may write what.
 
@@ -54,4 +55,4 @@ To connect the hosted database:
 
 ## Not yet
 
-Server side: UGA station ET pull (waiting on UGA's download link; until then the nightly job estimates ETo), and push reminders to locked phones. Imagery for farms outside the demo image. Everything on the PRD's "Later" list, including texting and Spanish.
+Server side: UGA station ET pull (waiting on UGA's download link; until then the nightly job estimates ETo). Imagery for farms outside the demo image. Everything on the PRD's "Later" list, including texting and Spanish.

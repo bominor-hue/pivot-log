@@ -11,7 +11,7 @@ create function auth.jwt() returns jsonb language sql stable as $$ select coales
 create function auth.uid() returns uuid language sql stable as $$ select nullif(auth.jwt() ->> 'sub', '')::uuid $$;
 grant usage on schema public, auth to authenticated;
 `
-const sql = readFileSync(new URL('../migrations/0001_init.sql', import.meta.url), 'utf8')
+const sql = ['0001_init.sql', '0002_reminders.sql'].map((f) => readFileSync(new URL(`../migrations/${f}`, import.meta.url), 'utf8')).join('\n')
 
 async function setup() {
   const pg = new PGlite()
@@ -62,5 +62,14 @@ describe('database rules', { timeout: 30000 }, () => {
     await pg.exec(`update field set data = '{"x":1}'`)
     const b = (await pg.query<{ u: string }>(`select updated_at::text u from field`)).rows[0].u
     expect(b > a).toBe(true)
+  })
+
+  it('crew phones turn reminders on and file lap reminders', async () => {
+    const pg = await setup()
+    await as(pg, 'crew@farm.test', 'password')
+    await pg.exec(`insert into push_device (endpoint, keys, who_name) values ('https://push.example/1', '{"p256dh":"a","auth":"b"}', 'Juan')`)
+    await pg.exec(`insert into reminder (id, pivot_id, on_id, fire_at, body) values ('x:now', 'p1', '${crypto.randomUUID()}', now(), 'Hodges 4 should be around now.')`)
+    await pg.exec(`update reminder set fire_at = now() + interval '1 hour'`)
+    expect((await pg.query('select * from reminder')).rows.length).toBe(1)
   })
 })

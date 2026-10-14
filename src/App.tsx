@@ -8,6 +8,8 @@ import { Reports } from './ui/Reports'
 import { FieldDetail, Fields, Log, MapView, PivotDetail, Today } from './ui/screens'
 import { TurnSheet } from './ui/TurnSheet'
 import { SignIn } from './ui/SignIn'
+import { fileReminders } from './push'
+import { lapReminders } from './reminders'
 
 type Tab = 'today' | 'map' | 'log' | 'fields' | 'reports'
 const ICONS: Record<Tab, JSX.Element> = {
@@ -54,6 +56,11 @@ export function App() {
       if (left <= 60 && left > 0) say(r.entryIds[0] + ':soon', `${p.pivot.name} will be around about ${fmtClock(r.eta)}. Leave it on or turn it off?`)
       if (left <= 0 && left > -180) say(r.entryIds[0] + ':now', `${p.pivot.name} should be around now. Did it make it?`)
     }
+  }, [state, tick])
+  // The same reminders, filed with the farm database so they reach locked phones (src/push.ts).
+  useEffect(() => {
+    if (!state) return
+    fileReminders(state.pivots.flatMap((p) => p.running?.eta ? lapReminders(p.pivot.id, p.pivot.name, p.running.entryIds[0], p.running.eta, fmtClock) : [])).catch(() => {})
   }, [state, tick])
 
   const push = useCallback((r: Route) => setStack((s) => [...s, r]), [])

@@ -11,6 +11,7 @@ import { importWeather } from '../import/weather'
 import { applyAgSense, planAgSense, type AgPlan } from '../import/agsense'
 import { importProbes } from '../import/probes'
 import { crewLogin, currentSession, emailCode, emailLink, logout, supabase, syncNow } from '../sync'
+import { makeReminderKeys, pushState, turnOffPush, turnOnPush, type PushState } from '../push'
 import { Seg, useNav } from './common'
 import { People } from './SignIn'
 
@@ -164,6 +165,45 @@ export function Settings({ onMe, signOut, canAdmin }: { onMe: (name: string) => 
   )
 }
 
+/** Lap reminders on a locked phone. The office sets up the farm's keys once. */
+function Reminders({ office }: { office: boolean }) {
+  const { toast, me } = useNav()
+  const [state, setState] = useState<PushState | null>(null)
+  const [busy, setBusy] = useState(false)
+  const [keys, setKeys] = useState<{ publicKey: string; privateKey: string } | null>(null)
+  useEffect(() => { pushState().then(setState) }, [])
+  if (!state) return null
+  const copy = (v: string) => navigator.clipboard?.writeText(v).then(() => toast('Copied'), () => {})
+  const flip = async () => {
+    setBusy(true)
+    const err = state === 'on' ? (await turnOffPush(), null) : await turnOnPush(me)
+    setBusy(false)
+    if (err) toast(err)
+    setState(await pushState())
+  }
+  return <>
+    <div className="sec">Lap reminders</div>
+    {state === 'not-set-up' ? (office ? <>
+      <p className="note">Reminders that reach a locked phone need the farm's reminder keys, made once here and kept in Netlify.</p>
+      {!keys ? <button className="cta sec2" onClick={async () => setKeys(await makeReminderKeys())}>Make reminder keys</button> : <>
+        <div className="card kv">
+          <span>VITE_VAPID_PUBLIC_KEY</span><b style={{ wordBreak: 'break-all' }}>{keys.publicKey} <button className="btn sm" onClick={() => copy(keys.publicKey)}>Copy</button></b>
+          <span>VAPID_PRIVATE_KEY</span><b style={{ wordBreak: 'break-all' }}>{keys.privateKey} <button className="btn sm" onClick={() => copy(keys.privateKey)}>Copy</button></b>
+        </div>
+        <p className="note">In Netlify, open pivot-log, then Project configuration, then Environment variables, and add these two, plus SUPABASE_SERVICE_KEY (the Supabase secret key). Then go to Deploys and choose Trigger deploy. Don't send the private key anywhere else. If you leave this screen first, just make new keys.</p>
+      </>}
+    </> : <p className="note">Reminders that reach a locked phone are not set up yet. The office sets them up here.</p>)
+    : state === 'add-to-home' ? <p className="note">On an iPhone, reminders only work from the Home Screen app. In Safari tap Share, then Add to Home Screen, and open Pivot Log from there.</p>
+    : state === 'unsupported' ? <p className="note">This browser can't show reminders on a locked screen.</p>
+    : state === 'blocked' ? <p className="note warn">Notifications are blocked for Pivot Log. Allow them in the phone's settings, then come back here.</p>
+    : <>
+      <div className="card kv"><span>On this phone</span><b>{state === 'on' ? 'On' : 'Off'}</b></div>
+      <button className={state === 'on' ? 'cta sec2' : 'cta'} disabled={busy} onClick={flip}>{state === 'on' ? 'Turn reminders off on this phone' : 'Turn on lap reminders'}</button>
+      <p className="note">An hour before a running pivot should make it around, and when it should be around, every phone with reminders on gets a notice, even locked.</p>
+    </>}
+  </>
+}
+
 /** Sign this device in to the farm's hosted database, and show what has been sent. */
 function FarmAccount({ waiting }: { waiting: number }) {
   const { toast } = useNav()
@@ -211,6 +251,7 @@ function FarmAccount({ waiting }: { waiting: number }) {
       {demo && <p className="note warn">Demo data is loaded, so nothing is sent or received. Erase this device to start with the farm's data.</p>}
       <button className="cta sec2" disabled={busy} onClick={async () => { setBusy(true); const r = await syncNow(); setBusy(false); toast(r.error ?? `Sent ${r.sent}, received ${r.received}${r.listsSent ? `, ${r.listsSent} list rows updated` : ''}`) }}>Sync now</button>
       <button className="cta sec2" onClick={() => logout()}>Sign this device out</button>
+      <Reminders office={!!office} />
       {waiting > 0 && <p className="note warn">Sign out only after unsent entries have gone up.</p>}
     </> : <>
       <div className="card form">

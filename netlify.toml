@@ -1,4 +1,6 @@
-# Netlify builds the app from this repo. Set VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY in
+# Netlify builds the app from this repo, and runs netlify/functions (lap reminders, every minute).
+# Set VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY (and for reminders SUPABASE_SERVICE_KEY,
+# VITE_VAPID_PUBLIC_KEY, VAPID_PRIVATE_KEY) in
 # Site configuration > Environment variables.
 [build]
   command = "npm ci && npm run build"
