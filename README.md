@@ -41,10 +41,16 @@ npm run build      # installable app in dist/ (host on any static host)
 npm run build:preview   # one-file preview in dist-preview/
 ```
 
-To connect the hosted database, create a Supabase project, run the migration in its SQL editor, and put the URL and anon key in `.env` (see `.env.example`).
+To connect the hosted database:
+1. Supabase: turn off new sign-ups, add the office email(s) and one shared crew login under Authentication > Users.
+2. GitHub repo secrets `SUPABASE_PROJECT_REF`, `SUPABASE_ACCESS_TOKEN`, `SUPABASE_DB_PASSWORD`, then run the **Database** workflow (Actions tab). It builds the tables from `supabase/migrations`.
+3. Netlify: connect this repo; set `VITE_SUPABASE_URL` and `VITE_SUPABASE_ANON_KEY` in its environment variables (`netlify.toml` has the build).
+4. In the app, Settings > Farm account: the office signs in by email link first (that login becomes the office); crew phones sign in with the crew login. Office devices send the master lists; every device sends entries and receives everyone's.
+
+`npm test` also runs the migration on an in-memory Postgres and checks who may write what.
 
 `scripts/build_demo_data.py /mnt/project-files` rebuilds the demo file and the model test fixture from the project files.
 
 ## Not yet
 
-Server side: pushing master lists to the hosted database, the nightly model job and the UGA ET pull (both need the farm's Supabase account). Imagery for farms outside the demo image. Everything on the PRD's "Later" list, including texting and Spanish.
+Server side: the nightly model job, the radar rain and UGA ET pulls, and push reminders to locked phones. Imagery for farms outside the demo image. Everything on the PRD's "Later" list, including texting and Spanish.

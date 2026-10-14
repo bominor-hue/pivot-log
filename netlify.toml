@@ -1,0 +1,7 @@
+# Netlify builds the app from this repo. Set VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY in
+# Site configuration > Environment variables.
+[build]
+  command = "npm ci && npm run build"
+  publish = "dist"
+[build.environment]
+  NODE_VERSION = "22"

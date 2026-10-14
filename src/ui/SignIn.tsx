@@ -1,3 +1,4 @@
+import { removePerson } from '../sync'
 import { useLiveQuery } from 'dexie-react-hooks'
 import { useState } from 'react'
 import { db, setSetting, uid, type Person } from '../db'
@@ -44,25 +45,28 @@ export function People() {
   const [name, setName] = useState('')
   const [role, setRole] = useState<Person['role']>('crew')
   const [pin, setPin] = useState('')
+  const [email, setEmail] = useState('')
   const ok = name.trim() && /^\d{4}$/.test(pin)
   return (
     <>
       <div className="sec">People <small>{people.length}</small></div>
       {people.length > 0 && <div className="card">{people.map((p) => (
-        <div key={p.id} className="row"><span className="t"><b>{p.name}</b><span>{p.role}{p.pinHash ? ' · PIN set' : ' · no PIN'}</span></span>
-          <button className="btn sm" onClick={() => db.people.delete(p.id)}>Remove</button></div>))}</div>}
+        <div key={p.id} className="row"><span className="t"><b>{p.name}</b><span>{p.role}{p.pinHash ? ' · PIN set' : ' · no PIN'}{p.email ? ` · ${p.email}` : ''}</span></span>
+          <button className="btn sm" onClick={() => removePerson(p.id)}>Remove</button></div>))}</div>}
       <div className="card form" style={{ marginTop: 10 }}>
         <div className="row"><label htmlFor="pp-name">Name</label><input id="pp-name" value={name} onChange={(e) => setName(e.target.value)} placeholder="Juan" /></div>
         {people.length > 0 && <div className="row"><label htmlFor="pp-role">Role</label><select id="pp-role" value={role} onChange={(e) => setRole(e.target.value as Person['role'])}><option value="crew">Crew</option><option value="manager">Manager</option><option value="office">Office</option></select></div>}
+        {(people.length === 0 || role !== 'crew') && <div className="row"><label htmlFor="pp-email">Email (office sign-in)</label><input id="pp-email" type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="Optional" /></div>}
         <div className="row"><label htmlFor="pp-pin">4-digit PIN</label><input id="pp-pin" inputMode="numeric" maxLength={4} value={pin} onChange={(e) => setPin(e.target.value.replace(/\D/g, ''))} /></div>
       </div>
       <button className="cta" disabled={!ok} onClick={async () => {
         // The first person added runs the office, and stays signed in, so nobody gets locked out.
         const first = people.length === 0
         const id = people.find((p) => p.name.toLowerCase() === name.trim().toLowerCase())?.id ?? uid()
-        await db.people.put({ id, name: name.trim(), role: first ? 'office' : role, pinHash: await hashPin(name, pin) })
+        const r = first ? 'office' : role
+        await db.people.put({ id, name: name.trim(), role: r, pinHash: await hashPin(name, pin), email: r !== 'crew' && email.trim() ? email.trim().toLowerCase() : null })
         if (first) { await setSetting('me', name.trim()); await setSetting('meId', id) }
-        setName(''); setPin('')
+        setName(''); setPin(''); setEmail('')
       }}>Add or update person</button>
       {people.length === 0 && <p className="note">Add yourself first. The first person added runs the office.</p>}
       <p className="note">Once anyone is added, the app asks "Who's logging?" and every entry carries that person's name. Only office and manager roles can import.</p>

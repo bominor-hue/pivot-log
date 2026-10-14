@@ -1,6 +1,7 @@
 import { useLiveQuery } from 'dexie-react-hooks'
-import { useState } from 'react'
-import { db, setSetting } from '../db'
+import { useEffect, useState } from 'react'
+import type { Session } from '@supabase/supabase-js'
+import { db, getSetting, setSetting } from '../db'
 import { clearAll, loadDemo } from '../domain/farm'
 import { readBoundaries, type Shape } from '../import/boundaries'
 import { applyFields, parseFieldRows, planFields, type FieldPlan } from '../import/fields'
@@ -9,8 +10,8 @@ import { readTable } from '../import/read'
 import { importWeather } from '../import/weather'
 import { applyAgSense, planAgSense, type AgPlan } from '../import/agsense'
 import { importProbes } from '../import/probes'
-import { supabase, pushEntries } from '../sync'
-import { useNav } from './common'
+import { crewLogin, currentSession, emailLink, logout, supabase, syncNow } from '../sync'
+import { Seg, useNav } from './common'
 import { People } from './SignIn'
 
 function Counts({ found, matched, isNew, needsLook }: { found: number; matched: number; isNew: number; needsLook: number }) {
@@ -155,16 +156,70 @@ export function Settings({ onMe, signOut, canAdmin }: { onMe: (name: string) => 
       <p className="note">Leave "as of" on today for the season. The demo sets it to July 16, 2026.</p>
       {hasPeople && <button className="cta sec2" onClick={signOut}>Switch person</button>}
       {canAdmin && <People />}
-      <div className="sec">Saving</div>
-      <div className="card kv">
-        <span>On this phone, not sent</span><b>{waiting}</b>
-        <span>Hosted database</span><b>{supabase ? 'Set up' : 'Not set up yet'}</b>
-      </div>
-      {supabase && <button className="cta sec2" onClick={async () => { const r = await pushEntries(); toast(r.error ?? `${r.sent} sent`) }}>Send now</button>}
-      <p className="note">Until the farm's hosted database is set up, everything stays on this device. Don't clear browser data on a phone with unsent entries.</p>
+      <FarmAccount waiting={waiting} />
       {canAdmin && <><div className="sec">Reset</div>
       <button className="cta off" onClick={() => (sure ? clearAll() : setSure(true))}>{sure ? 'Tap again to erase everything' : 'Erase this device'}</button>
       {sure && <p className="note warn">Entries not yet sent will be lost.</p>}</>}
     </div>
   )
+}
+
+/** Sign this device in to the farm's hosted database, and show what has been sent. */
+function FarmAccount({ waiting }: { waiting: number }) {
+  const { toast } = useNav()
+  const [session, setSession] = useState<Session | null>(null)
+  const [kind, setKind] = useState<'office' | 'crew'>('office')
+  const [email, setEmail] = useState('')
+  const [password, setPassword] = useState('')
+  const [busy, setBusy] = useState(false)
+  const [linkSent, setLinkSent] = useState(false)
+  const demo = useLiveQuery(() => getSetting('demo', false), [], false)
+  const office = useLiveQuery(() => getSetting('officeLogin', false), [], false)
+  const lastSync = useLiveQuery(() => getSetting<string | null>('lastSync', null), [], null)
+  useEffect(() => {
+    if (!supabase) return
+    currentSession().then(setSession)
+    const { data } = supabase.auth.onAuthStateChange((_e, s) => setSession(s))
+    return () => data.subscription.unsubscribe()
+  }, [])
+
+  if (!supabase) return <>
+    <div className="sec">Farm account</div>
+    <div className="card kv"><span>On this phone, not sent</span><b>{waiting}</b><span>Hosted database</span><b>Not set up yet</b></div>
+    <p className="note">Until the farm's hosted database is set up, everything stays on this device. Don't clear browser data on a phone with unsent entries.</p>
+  </>
+
+  async function go() {
+    setBusy(true)
+    const err = kind === 'office' ? await emailLink(email) : await crewLogin(email, password)
+    setBusy(false)
+    if (err) return toast(err)
+    if (kind === 'office') setLinkSent(true)
+    else { setPassword(''); toast('This phone is signed in') }
+  }
+
+  return <>
+    <div className="sec">Farm account</div>
+    {session ? <>
+      <div className="card kv">
+        <span>Signed in</span><b>{session.user.email}</b>
+        <span>Login</span><b>{office ? 'Office' : 'Crew phone'}</b>
+        <span>On this phone, not sent</span><b>{waiting}</b>
+        <span>Last synced</span><b>{lastSync ? new Date(lastSync).toLocaleString('en-US', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }) : 'Not yet'}</b>
+      </div>
+      {demo && <p className="note warn">Demo data is loaded, so nothing is sent or received. Erase this device to start with the farm's data.</p>}
+      <button className="cta sec2" disabled={busy} onClick={async () => { setBusy(true); const r = await syncNow(); setBusy(false); toast(r.error ?? `Sent ${r.sent}, received ${r.received}${r.listsSent ? `, ${r.listsSent} list rows updated` : ''}`) }}>Sync now</button>
+      <button className="cta sec2" onClick={() => logout()}>Sign this device out</button>
+      {waiting > 0 && <p className="note warn">Sign out only after unsent entries have gone up.</p>}
+    </> : <>
+      <div className="card form">
+        <div className="row"><label>This device is</label><Seg value={kind} options={[['office', 'Office'], ['crew', 'A crew phone']]} onChange={(v) => { setKind(v); setLinkSent(false) }} /></div>
+        <div className="row"><label htmlFor="fa-email">{kind === 'office' ? 'Your email' : 'Crew login email'}</label><input id="fa-email" type="email" autoComplete="username" value={email} onChange={(e) => setEmail(e.target.value)} /></div>
+        {kind === 'crew' && <div className="row"><label htmlFor="fa-pw">Crew password</label><input id="fa-pw" type="password" autoComplete="current-password" value={password} onChange={(e) => setPassword(e.target.value)} /></div>}
+      </div>
+      <button className="cta" disabled={busy || !email.trim() || (kind === 'crew' && !password)} onClick={go}>{kind === 'office' ? 'Email me a sign-in link' : 'Sign this phone in'}</button>
+      {linkSent && <p className="note">Check {email} and open the link on this device.</p>}
+      <p className="note">{kind === 'office' ? 'The first email-link sign-in becomes the office login. Office devices send the field, pivot and people lists to every phone.' : 'The office sets this up once on each crew phone. People then pick their name and PIN as usual.'} Waiting to send: {waiting}.</p>
+    </>}
+  </>
 }
