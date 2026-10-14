@@ -10,7 +10,7 @@ import { readTable } from '../import/read'
 import { importWeather } from '../import/weather'
 import { applyAgSense, planAgSense, type AgPlan } from '../import/agsense'
 import { importProbes } from '../import/probes'
-import { crewLogin, currentSession, emailLink, logout, supabase, syncNow } from '../sync'
+import { crewLogin, currentSession, emailCode, emailLink, logout, supabase, syncNow } from '../sync'
 import { Seg, useNav } from './common'
 import { People } from './SignIn'
 
@@ -173,6 +173,7 @@ function FarmAccount({ waiting }: { waiting: number }) {
   const [password, setPassword] = useState('')
   const [busy, setBusy] = useState(false)
   const [linkSent, setLinkSent] = useState(false)
+  const [code, setCode] = useState('')
   const demo = useLiveQuery(() => getSetting('demo', false), [], false)
   const office = useLiveQuery(() => getSetting('officeLogin', false), [], false)
   const lastSync = useLiveQuery(() => getSetting<string | null>('lastSync', null), [], null)
@@ -218,7 +219,13 @@ function FarmAccount({ waiting }: { waiting: number }) {
         {kind === 'crew' && <div className="row"><label htmlFor="fa-pw">Crew password</label><input id="fa-pw" type="password" autoComplete="current-password" value={password} onChange={(e) => setPassword(e.target.value)} /></div>}
       </div>
       <button className="cta" disabled={busy || !email.trim() || (kind === 'crew' && !password)} onClick={go}>{kind === 'office' ? 'Email me a sign-in link' : 'Sign this phone in'}</button>
-      {linkSent && <p className="note">Check {email} and open the link on this device.</p>}
+      {linkSent && <>
+        <div className="card form" style={{ marginTop: 10 }}>
+          <div className="row"><label htmlFor="fa-code">Code from the email</label><input id="fa-code" inputMode="numeric" autoComplete="one-time-code" maxLength={8} value={code} onChange={(e) => setCode(e.target.value.replace(/\D/g, ''))} placeholder="123456" /></div>
+        </div>
+        <button className="cta" disabled={busy || code.length < 6} onClick={async () => { setBusy(true); const err = await emailCode(email, code); setBusy(false); if (err) toast(err); else { setCode(''); toast('Signed in') } }}>Sign in with the code</button>
+        <p className="note">Check {email}. Type the code here, or open the link on this same device. On an iPhone home-screen app, use the code.</p>
+      </>}
       <p className="note">{kind === 'office' ? 'The first email-link sign-in becomes the office login. Office devices send the field, pivot and people lists to every phone.' : 'The office sets this up once on each crew phone. People then pick their name and PIN as usual.'} Waiting to send: {waiting}.</p>
     </>}
   </>

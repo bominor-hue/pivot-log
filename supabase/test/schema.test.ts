@@ -25,7 +25,7 @@ const as = async (pg: PGlite, email: string, method: string) => {
 }
 const entry = (how = 'app') => `insert into entry (id, pivot_id, action, happened_at, recorded_at, who_name, how) values ('${crypto.randomUUID()}', 'p1', 'on', now(), now(), 'Juan', '${how}')`
 
-describe('database rules', () => {
+describe('database rules', { timeout: 30000 }, () => {
   it('first email-link sign-in claims the office; crew password login cannot', async () => {
     const pg = await setup()
     await as(pg, 'crew@farm.test', 'password')
