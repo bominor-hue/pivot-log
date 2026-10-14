@@ -23,6 +23,7 @@ export function TurnSheet({ pivotId, mode, onClose }: { pivotId: string; mode: '
   const [more, setMore] = useState(false)
   const [starting, setStarting] = useState(false)
   const [around, setAround] = useState<boolean | null>(null)
+  const [askAround, setAskAround] = useState(false)
   const [note, setNote] = useState('')
   const [saving, setSaving] = useState(false)
 
@@ -31,14 +32,21 @@ export function TurnSheet({ pivotId, mode, onClose }: { pivotId: string; mode: '
   const perPass = pass && f && pv.acres ? inchesFrom(f.gpm, pass, pv.acres) : null
   const toStop = stopHours({ plannedStop: stop, direction, startDeg: startDeg === '' ? null : Number(startDeg), stopDeg: stopDeg === '' ? null : Number(stopDeg) }, pass)
   const startMs = when === 'now' ? Date.now() : Date.parse(at)
-  const running = pv.running
+  const [running] = useState(pv.running) // keep what was running when the sheet opened, so the stop animation does not flash a warning
   const offHours = running ? (when === 'now' ? hoursSince(running.start!) : (Date.parse(at) - Date.parse(running.start!)) / 3600000) : null
+
+  // Turn off: guess "made it around" from the lap time; the person can change it.
+  const rPass = running?.percentTimer ? hoursPerPass(pv.pivot, running.percentTimer, pv.lapHours100?.hours ?? null) : null
+  const ranH = offHours !== null ? Math.max(0, offHours) : null
+  const guess = rPass && ranH !== null ? (ranH >= rPass * 0.95 ? true : ranH < rPass * 0.85 ? false : null) : null
+  const pick = around ?? guess
 
   let startedTap = Date.now()
   async function save() {
+    if (mode === 'off' && pick === null) { setAskAround(true); return }
     setSaving(true)
     startedTap = Date.now()
-    if (mode === 'on') setStarting(true)
+    if (mode !== 'run') setStarting(true)
     const coords = await new Promise<GeolocationCoordinates | null>((res) => {
       if (!('geolocation' in navigator)) return res(null)
       navigator.geolocation.getCurrentPosition((p) => res(p.coords), () => res(null), { timeout: 4000, maximumAge: 120000 })
@@ -52,14 +60,14 @@ export function TurnSheet({ pivotId, mode, onClose }: { pivotId: string; mode: '
       direction, percentTimer: pct, plannedStop: stop, endGun,
       startDeg: startDeg === '' ? null : Number(startDeg), stopDeg: stop === 'position' && stopDeg !== '' ? Number(stopDeg) : null,
     })
-    if (mode === 'off' || mode === 'run') base.madeItAround = around
+    if (mode === 'off' || mode === 'run') base.madeItAround = mode === 'off' ? pick : around
     if (mode === 'run') { base.startAt = new Date(startAt).toISOString(); base.stopAt = new Date(at).toISOString(); base.happenedAt = base.stopAt; base.how = 'office' }
     if (mode === 'run' && Date.parse(base.stopAt!) <= Date.parse(base.startAt!)) { setSaving(false); toast('Stop must be after start'); return }
     await db.entries.add(base)
     // Ask once for notifications so the lap reminder can reach the lock screen while the app is open.
     if (mode === 'on' && 'Notification' in window && Notification.permission === 'default') Notification.requestPermission().catch(() => {})
     toast(mode === 'on' ? `${pv.pivot.name} on` : mode === 'off' ? `${pv.pivot.name} off` : 'Run saved')
-    if (mode === 'on') await new Promise((r) => setTimeout(r, Math.max(0, 1300 - (Date.now() - startedTap))))
+    if (mode !== 'run') await new Promise((r) => setTimeout(r, Math.max(0, 1300 - (Date.now() - startedTap))))
     onClose()
   }
 
@@ -109,33 +117,60 @@ export function TurnSheet({ pivotId, mode, onClose }: { pivotId: string; mode: '
     )
   }
 
-  const title = mode === 'off' ? `Turn off · ${pv.pivot.name}` : `Log a past run · ${pv.pivot.name}`
+  if (mode === 'off') {
+    const onEntry = running ? state.entries.find((e) => e.id === running.entryIds[0]) : undefined
+    const rDir = (running?.direction as 'forward' | 'reverse') ?? 'forward'
+    const doneDeg = rPass && ranH !== null ? (ranH / rPass) * 360 : 0
+    const pickAround = (v: boolean) => { setAround(v); setAskAround(false) }
+    return (
+      <Sheet onClose={onClose}>
+        <div className="ton-head">
+          <h2>{pv.pivot.name}</h2>
+          <p className="sub">{pv.fields.map((x) => x.name).join(', ') || 'No fields linked'}{pv.acres ? ` · ${pv.acres.toFixed(0)} ac` : ''}</p>
+        </div>
+
+        <PivotDial variant="off" direction={rDir} startDeg={onEntry?.startDeg ?? null} stopDeg={onEntry?.stopDeg ?? null} stop={(running?.plannedStop as PlannedStop) ?? 'lap'}
+          doneDeg={doneDeg} starting={starting} disabled={saving} onStart={save} />
+
+        <p className={`ton-ask ${askAround ? 'show' : ''}`}>Did it make it around?</p>
+        <div className={`ton-dir ton-around ${askAround ? 'ask' : ''}`} role="group" aria-label="Did it make it around">
+          <button type="button" className={pick === true ? 'on' : ''} onClick={() => pickAround(true)}>Made it around</button>
+          <button type="button" className={pick === false ? 'on' : ''} onClick={() => pickAround(false)}>Stopped part way</button>
+        </div>
+
+        {running ? <div className="ton-sum">
+          <div><b>{fmtClockDay(running.start!)}</b><span>on since</span></div>
+          <div><b>{ranH !== null ? fmtHours(ranH) : '–'}</b><span>{rPass ? `of a ${fmtHours(rPass)} lap` : 'running'}</span></div>
+          <div><b>{f && pv.acres && ranH !== null ? `${inchesFrom(f.gpm, ranH, pv.acres).toFixed(2)} in` : '–'}</b><span>put on</span></div>
+        </div> : <div className="calc warn">No ON logged for this pivot. The OFF will be saved and listed as a gap to fill.</div>}
+        <p className="note ton-note">Stopping {when === 'now' ? 'now' : fmtWhen(new Date(at).toISOString())}{running ? ` · ${running.direction ?? ''} at ${running.percentTimer ?? '?'}%` : ''}{guess !== null && around === null ? ' · "made it around" guessed from lap time, tap to change' : ''}</p>
+
+        {!more ? <button type="button" className="ton-more" onClick={() => setMore(true)}>Stopped earlier, or add a note</button> : (
+          <div className="card form">
+            <div className="row"><label>When</label><Seg value={when} options={[['now', 'Now'], ['earlier', 'Earlier']]} onChange={setWhen} /></div>
+            {when === 'earlier' && <div className="row"><label>Stopped at</label><input type="datetime-local" value={at} onChange={(e) => setAt(e.target.value)} /></div>}
+            <div className="row"><label>Note</label><input value={note} onChange={(e) => setNote(e.target.value)} placeholder="Optional" /></div>
+          </div>
+        )}
+      </Sheet>
+    )
+  }
+
   return (
     <Sheet onClose={onClose}>
-      <h2>{title}</h2>
+      <h2>Log a past run · {pv.pivot.name}</h2>
       <p className="sub">{pv.fields.map((x) => x.name).join(', ') || 'No fields linked'}{pv.acres ? ` · ${pv.acres.toFixed(0)} ac` : ''}</p>
 
       <div className="card form">
-        {mode === 'run' && <div className="row"><label>Started</label><input type="datetime-local" value={startAt} onChange={(e) => setStartAt(e.target.value)} /></div>}
-        {mode !== 'run' && <div className="row"><label>When</label><Seg value={when} options={[['now', 'Now'], ['earlier', 'Earlier']]} onChange={setWhen} /></div>}
-        {(when === 'earlier' || mode === 'run') && <div className="row"><label>{mode === 'run' ? 'Stopped' : 'Stopped at'}</label><input type="datetime-local" value={at} onChange={(e) => setAt(e.target.value)} /></div>}
-        {mode !== 'off' && <>
-          <div className="row"><label>Direction</label><Seg value={direction} options={[['forward', 'Forward'], ['reverse', 'Reverse']]} onChange={setDirection} /></div>
-          <div className="row"><label>Percent timer</label><input type="number" inputMode="numeric" min={1} max={100} value={pct} onChange={(e) => setPct(Number(e.target.value))} style={{ width: 80 }} /></div>
-        </>}
+        <div className="row"><label>Started</label><input type="datetime-local" value={startAt} onChange={(e) => setStartAt(e.target.value)} /></div>
+        <div className="row"><label>Stopped</label><input type="datetime-local" value={at} onChange={(e) => setAt(e.target.value)} /></div>
+        <div className="row"><label>Direction</label><Seg value={direction} options={[['forward', 'Forward'], ['reverse', 'Reverse']]} onChange={setDirection} /></div>
+        <div className="row"><label>Percent timer</label><input type="number" inputMode="numeric" min={1} max={100} value={pct} onChange={(e) => setPct(Number(e.target.value))} style={{ width: 80 }} /></div>
         <div className="row"><label>Made it around?</label><Seg value={around === null ? '' : around ? 'y' : 'n'} options={[['y', 'Made it around'], ['n', 'Stopped part way']]} onChange={(v) => setAround(v === 'y')} /></div>
         <div className="row"><label>Note</label><input value={note} onChange={(e) => setNote(e.target.value)} placeholder="Optional" /></div>
       </div>
 
-      {mode === 'off' && running && <div className="calc">
-        On since <b>{fmtWhen(running.start!)}</b>, <b>{fmtHours(Math.max(0, offHours!))}</b>
-        {f && pv.acres ? <> · about <b>{inchesFrom(f.gpm, Math.max(0, offHours!), pv.acres).toFixed(2)} in</b></> : null}
-      </div>}
-      {mode === 'off' && !running && <div className="calc warn">No ON logged for this pivot. The OFF will be saved and listed as a gap to fill.</div>}
-
-      <button className={`cta ${mode === 'off' ? 'off' : ''}`} disabled={saving} onClick={save}>
-        {mode === 'off' ? (when === 'now' ? 'Turn off now' : 'Save stop') : 'Save run'}
-      </button>
+      <button className="cta" disabled={saving} onClick={save}>Save run</button>
       <button className="cta sec2" onClick={onClose}>Cancel</button>
     </Sheet>
   )
@@ -148,9 +183,10 @@ const fmtClockDay = (iso: string) => {
 }
 
 /** The pivot seen from above: arm, towers, end gun and the path it will water. The hub is the start button. */
-function PivotDial({ direction, startDeg, stopDeg, stop, starting, disabled, onStart, onFlip }: {
+function PivotDial({ direction, startDeg, stopDeg, stop, starting, disabled, onStart, onFlip, variant = 'on', doneDeg = 0 }: {
   direction: 'forward' | 'reverse'; startDeg: number | null; stopDeg: number | null; stop: PlannedStop
-  starting: boolean; disabled: boolean; onStart: () => void; onFlip: () => void
+  starting: boolean; disabled: boolean; onStart: () => void; onFlip?: () => void
+  variant?: 'on' | 'off'; doneDeg?: number // off: how far the arm has gone since it started
 }) {
   const C = 130, R = 112
   const a0 = startDeg ?? 0
@@ -161,9 +197,13 @@ function PivotDial({ direction, startDeg, stopDeg, stop, starting, disabled, onS
   const [x1, y1] = pt(a0, R - 8), [x2, y2] = pt(a0 + sign * Math.min(sweep, 359.9), R - 8)
   const arc = `M${x1},${y1} A${R - 8},${R - 8} 0 ${sweep > 180 ? 1 : 0} ${sign > 0 ? 1 : 0} ${x2},${y2}`
   const [ax, ay] = pt(a0 + sign * 26, R + 10)
+  const done = Math.min(doneDeg, 359.9)
+  const armDeg = variant === 'off' ? a0 + sign * done : a0
+  const [wx, wy] = pt(armDeg, R - 8)
+  const wet = `M${x1},${y1} A${R - 8},${R - 8} 0 ${done > 180 ? 1 : 0} ${sign > 0 ? 1 : 0} ${wx},${wy}`
   const towers = [0.3, 0.52, 0.74, 0.94]
   return (
-    <div className={`ton-dial ${starting ? 'go' : ''} ${direction}`}>
+    <div className={`ton-dial ${variant} ${starting ? 'go' : ''} ${direction}`}>
       <svg viewBox="0 0 260 260" aria-hidden>
         <defs>
           <radialGradient id="tonField" cx="50%" cy="50%" r="50%">
@@ -174,8 +214,9 @@ function PivotDial({ direction, startDeg, stopDeg, stop, starting, disabled, onS
         <circle cx={C} cy={C} r={R} fill="url(#tonField)" stroke="var(--sep)" />
         {[0.3, 0.52, 0.74].map((k) => <circle key={k} cx={C} cy={C} r={R * k} fill="none" stroke="var(--sep)" strokeDasharray="2 5" />)}
         <path d={arc} fill="none" stroke="var(--water)" strokeWidth="5" strokeLinecap="round" strokeDasharray="1 9" opacity=".75" />
+        {variant === 'off' && done > 1 && <path d={wet} fill="none" stroke="var(--water)" strokeWidth="9" strokeLinecap="round" opacity=".55" />}
         {stop === 'position' && stopDeg !== null && (() => { const [sx, sy] = pt(stopDeg, R); return <line x1={C} y1={C} x2={sx} y2={sy} stroke="var(--coral)" strokeWidth="2" strokeDasharray="4 4" /> })()}
-        <g className="ton-arm" style={{ transformOrigin: `${C}px ${C}px`, transform: `rotate(${a0}deg)` }}>
+        <g className="ton-arm" style={{ transformOrigin: `${C}px ${C}px`, transform: `rotate(${armDeg}deg)` }}>
           <g className="ton-arm-spin" style={{ transformOrigin: `${C}px ${C}px` }}>
             <rect x={C - 2.5} y={C - R + 2} width="5" height={R - 2} rx="2.5" fill="var(--fg)" opacity=".85" />
             {towers.map((k) => <circle key={k} cx={C} cy={C - R * k} r="5" fill="var(--card)" stroke="var(--fg)" strokeWidth="2" />)}
@@ -183,14 +224,14 @@ function PivotDial({ direction, startDeg, stopDeg, stop, starting, disabled, onS
             <g className="ton-spray">{[0.38, 0.6, 0.82].map((k) => <circle key={k} cx={C + 9} cy={C - R * k} r="2.4" fill="var(--water)" />)}</g>
           </g>
         </g>
-        <g className="ton-flip" onClick={onFlip} style={{ cursor: 'pointer', pointerEvents: 'all' }}>
+        {onFlip && <g className="ton-flip" onClick={onFlip} style={{ cursor: 'pointer', pointerEvents: 'all' }}>
           <circle cx={ax} cy={ay} r="15" fill="var(--card)" stroke="var(--sep)" />
           <text x={ax} y={ay + 6} textAnchor="middle" fontSize="18" fill="var(--water)">{direction === 'forward' ? '↻' : '↺'}</text>
-        </g>
+        </g>}
       </svg>
-      <button type="button" className="ton-hub" disabled={disabled} onClick={onStart} aria-label="Start the pivot now">
+      <button type="button" className="ton-hub" disabled={disabled} onClick={onStart} aria-label={variant === 'off' ? 'Stop the pivot now' : 'Start the pivot now'}>
         <svg viewBox="0 0 24 24" width="30" height="30" aria-hidden><path d="M12 3v8" stroke="currentColor" strokeWidth="2.6" strokeLinecap="round" /><path d="M7.05 6.05a7 7 0 1 0 9.9 0" fill="none" stroke="currentColor" strokeWidth="2.6" strokeLinecap="round" /></svg>
-        <span>{starting ? 'Running' : 'Start'}</span>
+        <span>{variant === 'off' ? (starting ? 'Stopped' : 'Stop') : starting ? 'Running' : 'Start'}</span>
       </button>
     </div>
   )

@@ -6,7 +6,7 @@ A web app that installs to a phone's home screen from a link and works with no s
 ## What's in the first version (PRD v3 must-haves)
 
 1. **Turn on**: a pivot dial with one Start button. Defaults to now, one lap and end gun on; direction and percent timer remember the last run. Shows lap time, inches per lap and when it should be back around. Started earlier, a stop spot in degrees, or keep going are under "more".
-2. **Turn off**: stop time, made it around or stopped part way. **Log a past run** for missed entries.
+2. **Turn off**: the same pivot dial with one Stop button, showing how far the arm has gone, hours and inches so far. "Made it around" is guessed from the lap time and must be answered before it saves. **Log a past run** for missed entries.
 3. **Lap reminder** an hour before and when a pivot should be around (in-app, plus a system notification if allowed). Lap time is learned from "made it around" until the dealer chart value is on the pivot profile.
 4. **Running now** on Today, with long runs flagged "Still running?".
 5. **Offline**: everything is saved on the phone (IndexedDB) and sent when there's signal. Entries are never edited; undo adds a correction entry.

@@ -177,3 +177,17 @@ tr.sub td{font-weight:600;background:var(--fill)}
 .ton-sum span{display:block;font-size:12.5px;color:var(--fg2);margin-top:2px}
 .ton-note{text-align:center}
 .ton-more{display:block;margin:12px auto 4px;color:var(--water);font-size:15px;padding:6px}
+
+/* Turn off: same dial, coral stop hub */
+.ton-dial.off .ton-hub{background:var(--coral);color:#fff;box-shadow:0 6px 18px color-mix(in srgb,var(--coral) 40%,transparent),inset 0 -3px 0 rgba(0,0,0,.12)}
+.ton-dial.off .ton-hub::after{border-color:var(--coral)}
+.ton-dial.off .ton-spray{animation:tonSpray .5s ease-in-out infinite alternate}
+.ton-dial.off.go .ton-spray{animation:none;opacity:0;transition:opacity .4s}
+.ton-dial.off.go .ton-arm-spin{animation:none}
+.ton-dial.off.go .ton-hub{background:var(--fg3)}
+.ton-dial.off.go .ton-hub::after{animation:none;opacity:0}
+.ton-ask{text-align:center;margin:8px 0 0;font-size:14px;color:var(--fg2)}
+.ton-ask.show{color:var(--coral);font-weight:600}
+.ton-around{margin-top:6px}
+.ton-around.ask button{box-shadow:0 0 0 2px var(--coral) inset;animation:tonNudge .35s}
+@keyframes tonNudge{25%{transform:translateX(-4px)}75%{transform:translateX(4px)}}
