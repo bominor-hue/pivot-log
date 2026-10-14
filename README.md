@@ -5,7 +5,7 @@ A web app that installs to a phone's home screen from a link and works with no s
 
 ## What's in the first version (PRD v3 must-haves)
 
-1. **Turn on**: start time (defaults to now), forward or reverse, percent timer, stop point (one lap, at a degree, keep going), end gun. Shows lap time and inches per lap and remembers the last settings.
+1. **Turn on**: a pivot dial with one Start button. Defaults to now, one lap and end gun on; direction and percent timer remember the last run. Shows lap time, inches per lap and when it should be back around. Started earlier, a stop spot in degrees, or keep going are under "more".
 2. **Turn off**: stop time, made it around or stopped part way. **Log a past run** for missed entries.
 3. **Lap reminder** an hour before and when a pivot should be around (in-app, plus a system notification if allowed). Lap time is learned from "made it around" until the dealer chart value is on the pivot profile.
 4. **Running now** on Today, with long runs flagged "Still running?".

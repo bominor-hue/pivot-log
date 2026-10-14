@@ -140,3 +140,40 @@ tfoot td{font-weight:700;border-top:1px solid var(--fg3);border-bottom:0}
 .chipbtn button+button{padding:7px 10px 7px 4px;color:var(--fg3)}
 .chk{display:inline-flex;align-items:center;gap:6px;font-size:14px;background:var(--fill);border-radius:8px;padding:5px 10px}
 tr.sub td{font-weight:600;background:var(--fill)}
+
+/* Turn on: the pivot dial */
+.ton-head{text-align:center}
+.ton-head .sub{margin-bottom:4px}
+.ton-dial{position:relative;width:min(300px,82vw);aspect-ratio:1;max-width:100%;margin:4px auto 0}
+.ton-dial>svg{width:100%;height:100%;display:block;overflow:visible}
+.ton-hub{position:absolute;left:50%;top:50%;width:96px;height:96px;margin:-48px 0 0 -48px;border-radius:50%;background:var(--water);color:var(--water-ink);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;font:600 15px var(--round);box-shadow:0 6px 18px color-mix(in srgb,var(--water) 40%,transparent),inset 0 -3px 0 rgba(0,0,0,.12);transition:transform .15s}
+.ton-hub:active{transform:scale(.94)}
+.ton-hub::after{content:"";position:absolute;inset:-8px;border-radius:50%;border:2px solid var(--water);opacity:.35;animation:tonPulse 2.2s ease-out infinite}
+.ton-dial.go .ton-hub{background:var(--leaf)}
+.ton-dial.go .ton-hub::after{border-color:var(--leaf);animation-duration:.9s}
+.ton-spray{opacity:0}
+.ton-dial.go .ton-spray{animation:tonSpray .5s ease-in-out infinite alternate}
+.ton-dial.go.forward .ton-arm-spin{animation:tonSpinF 1.3s cubic-bezier(.45,.05,.4,1) forwards}
+.ton-dial.go.reverse .ton-arm-spin{animation:tonSpinR 1.3s cubic-bezier(.45,.05,.4,1) forwards}
+@keyframes tonPulse{0%{transform:scale(.92);opacity:.5}100%{transform:scale(1.25);opacity:0}}
+@keyframes tonSpinF{to{transform:rotate(360deg)}}
+@keyframes tonSpinR{to{transform:rotate(-360deg)}}
+@keyframes tonSpray{from{opacity:.25}to{opacity:.95}}
+@media (prefers-reduced-motion:reduce){.ton-dial.go .ton-arm-spin{animation:none}.ton-hub::after{animation:none}}
+.ton-dir{display:flex;gap:8px;margin:8px 0 0}
+.ton-dir button{flex:1;height:46px;border-radius:12px;background:var(--fill);font-weight:600;font-size:16px;color:var(--fg2)}
+.ton-dir button span{font-size:19px}
+.ton-dir button.on{background:var(--card);color:var(--water);box-shadow:0 0 0 2px var(--water) inset}
+.ton-pct{display:flex;align-items:center;justify-content:space-between;background:var(--card);border-radius:16px;padding:10px 12px;margin-top:10px}
+.ton-pct>button{width:52px;height:52px;border-radius:50%;background:var(--fill);font-size:28px;font-weight:500;color:var(--water)}
+.ton-pct>button:active{transform:scale(.94)}
+.ton-pct div{text-align:center}
+.ton-pct b{display:block;font:700 40px/1 var(--round);letter-spacing:-.02em;font-variant-numeric:tabular-nums}
+.ton-pct b small{font-size:22px;color:var(--fg2);margin-left:1px}
+.ton-pct span{font-size:13px;color:var(--fg2)}
+.ton-sum{display:grid;grid-template-columns:repeat(3,1fr);gap:1px;background:var(--sep);border-radius:16px;overflow:hidden;margin-top:10px}
+.ton-sum div{background:color-mix(in srgb,var(--water) 8%,var(--card));padding:10px 8px;text-align:center;min-width:0}
+.ton-sum b{display:block;font-weight:600;font-size:15px;font-variant-numeric:tabular-nums}
+.ton-sum span{display:block;font-size:12.5px;color:var(--fg2);margin-top:2px}
+.ton-note{text-align:center}
+.ton-more{display:block;margin:12px auto 4px;color:var(--water);font-size:15px;padding:6px}
