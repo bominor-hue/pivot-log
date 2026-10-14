@@ -5,6 +5,7 @@ import { growthStage, isCrop, type BalanceDay } from '../model/waterBalance'
 import type { FieldView } from '../domain/farm'
 import type { Run } from '../domain/runs'
 import { flow, hoursPerPass, inchesFrom, num } from '../domain/pivot'
+import { ChartRead } from './ChartRead'
 import { Chevron, FieldRow, PivotRow, Ring, Seg, describeEntry, fmtHours, fmtIn, fmtWhen, milesBetween, useGeo, useNav } from './common'
 
 function Empty() {
@@ -268,7 +269,8 @@ const cap = (s: string) => s[0].toUpperCase() + s.slice(1)
 
 const PROFILE_LABELS: [string, string][] = [
   ['irrigatedAcres', 'Irrigated acres'], ['flowGpm', 'Design flow (gpm)'], ['measuredGpm', 'Measured flow (gpm)'], ['agsenseGpm', 'AgSense gpm (typed in)'],
-  ['hoursPerRev100', 'Hours per rev at 100%'], ['arcDeg', 'Circle (deg)'], ['endGun', 'End gun'], ['make', 'Make'], ['model', 'Model'], ['controlPanel', 'Control panel'],
+  ['hoursPerRev100', 'Hours per rev at 100%'], ['arcDeg', 'Circle (deg)'], ['designPsi', 'Design pressure (psi)'], ['lengthFt', 'Length (ft)'], ['wettedRadiusFt', 'Wetted radius (ft)'], ['towers', 'Towers'],
+  ['endGun', 'End gun'], ['sprinklerPackage', 'Sprinkler package'], ['make', 'Make'], ['model', 'Model'], ['serial', 'Serial / order #'], ['controlPanel', 'Control panel'],
   ['waterSource', 'Water source'], ['wellId', 'Well / intake ID'], ['epdPermit', 'GA EPD permit #'], ['stateMeterId', 'State meter ID'], ['dealer', 'Dealer'], ['knownProblems', 'Known problems'],
 ]
 
@@ -293,7 +295,8 @@ export function PivotDetail({ id }: { id: string }) {
         <span>Acres used for inches</span><b>{pv.acres ? pv.acres.toFixed(1) : '–'}</b>
         <span>Inches per pass at 100%</span><b>{f && pass100 && pv.acres ? inchesFrom(f.gpm, pass100, pv.acres).toFixed(2) : '–'}</b>
       </div>
-      {!f && <p className="note warn">No flow rate yet. Fill "Design flow (gpm)" on the pivot info sheet and import it.</p>}
+      {!f && <p className="note warn">No flow rate yet. Fill "Design flow (gpm)" on the pivot info sheet and import it, or read it from the sprinkler chart.</p>}
+      <ChartRead pivot={pv.pivot} />
     </div>
   )
 }
