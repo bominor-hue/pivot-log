@@ -2,15 +2,21 @@ import { createContext, useContext, useEffect, useState, type ReactNode } from '
 import type { FarmState, FieldView, PivotView } from '../domain/farm'
 import type { Entry } from '../db'
 import type { Run } from '../domain/runs'
+import { CROP_FILTERS, type CropFilter } from '../domain/crop'
+import { CropGlyph } from './brand'
 
-export type Route = { kind: 'field'; id: string } | { kind: 'pivot'; id: string } | { kind: 'import' } | { kind: 'settings' }
+export type SettingsTab = 'users' | 'conn' | 'pivots'
+export type Route = { kind: 'field'; id: string } | { kind: 'pivot'; id: string } | { kind: 'import' } | { kind: 'settings'; tab?: SettingsTab } | { kind: 'welcome' }
 export interface Nav {
   push: (r: Route) => void
   back: () => void
   turn: (pivotId: string, mode: 'on' | 'off' | 'run') => void
   toast: (msg: string) => void
-  state: FarmState
+  state: FarmState // narrowed by the crop filter on the main tabs
   me: string
+  crop?: CropFilter
+  setCrop?: (c: CropFilter) => void
+  canAdmin?: boolean
 }
 export const NavCtx = createContext<Nav>(null as any)
 export const useNav = () => useContext(NavCtx)
@@ -125,4 +131,27 @@ export const milesBetween = (a: { lat: number; lon: number }, b: { lat: number; 
   const dLat = (b.lat - a.lat) * toR, dLon = (b.lon - a.lon) * toR
   const h = Math.sin(dLat / 2) ** 2 + Math.cos(a.lat * toR) * Math.cos(b.lat * toR) * Math.sin(dLon / 2) ** 2
   return 2 * R * Math.asin(Math.sqrt(h))
+}
+
+/** All / Cotton / Peanuts / Corn. One glass knob slides to the pick; the choice stays across tabs. */
+export function CropBar() {
+  const { crop = 'All', setCrop } = useNav()
+  if (!setCrop) return null
+  return (
+    <div className="crops" role="group" aria-label="Crop filter">
+      <span className="knob" style={{ '--k': CROP_FILTERS.indexOf(crop) } as any} />
+      {CROP_FILTERS.map((c) => <button key={c} type="button" aria-pressed={crop === c} onClick={() => setCrop(c)}><CropGlyph crop={c} />{c}</button>)}
+    </div>
+  )
+}
+
+/** Large page title with the person button on the right (opens Settings). */
+export function Head({ title, sub }: { title: string; sub?: ReactNode }) {
+  const { me, push } = useNav()
+  return (
+    <div className="hd">
+      <div style={{ minWidth: 0 }}><h1>{title}</h1>{sub && <small>{sub}</small>}</div>
+      <button className="av" onClick={() => push({ kind: 'settings' })} aria-label="Settings">{(me || '?').trim()[0]?.toUpperCase() ?? '?'}</button>
+    </div>
+  )
 }

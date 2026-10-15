@@ -157,8 +157,8 @@ async function pushMaster(who: string): Promise<number> {
       n += batch.length
     }
   }
-  // Office and manager people with an email can sign in by link as office.
-  const office = (await db.people.toArray()).filter((p) => p.email && p.role !== 'crew').map((p) => ({ email: p.email!.trim().toLowerCase() }))
+  // Office and manager people with an email can sign in by link as office (viewers never).
+  const office = (await db.people.toArray()).filter((p) => p.email && (p.role === 'office' || p.role === 'manager')).map((p) => ({ email: p.email!.trim().toLowerCase() }))
   if (office.length) await supabase!.from('office_user').upsert(office, { ignoreDuplicates: true })
   return n
 }
@@ -168,6 +168,21 @@ export async function removePerson(id: string) {
   await db.people.delete(id)
   if (supabase && (await getSetting('officeLogin', false)) && !(await getSetting('demo', false))) {
     await supabase.from('person').delete().eq('id', id)
+  }
+}
+
+/** Office: email invite, office rights and removing a login (netlify/functions/users.mts). */
+export async function manageLogin(action: 'invite' | 'role' | 'remove', email: string, role?: string): Promise<string | null> {
+  if (!supabase) return 'The farm account is not set up yet, so email sign-in is off. Saved on this device.'
+  if (await getSetting('demo', false)) return null
+  const session = await currentSession()
+  if (!session || !(await getSetting('officeLogin', false))) return 'Sign in as the office first (Settings, Connections).'
+  try {
+    const res = await fetch('/.netlify/functions/users', { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${session.access_token}` }, body: JSON.stringify({ action, email, role, redirectTo: location.origin + location.pathname }) })
+    const out = await res.json().catch(() => ({ error: `Error ${res.status}` }))
+    return res.ok && !out.error ? null : out.error ?? `Error ${res.status}`
+  } catch {
+    return 'No signal. Try again when the phone is online.'
   }
 }
 

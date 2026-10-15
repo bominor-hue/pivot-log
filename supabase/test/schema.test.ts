@@ -11,7 +11,7 @@ create function auth.jwt() returns jsonb language sql stable as $$ select coales
 create function auth.uid() returns uuid language sql stable as $$ select nullif(auth.jwt() ->> 'sub', '')::uuid $$;
 grant usage on schema public, auth to authenticated;
 `
-const sql = ['0001_init.sql', '0002_reminders.sql'].map((f) => readFileSync(new URL(`../migrations/${f}`, import.meta.url), 'utf8')).join('\n')
+const sql = ['0001_init.sql', '0002_reminders.sql', '0003_viewers.sql'].map((f) => readFileSync(new URL(`../migrations/${f}`, import.meta.url), 'utf8')).join('\n')
 
 async function setup() {
   const pg = new PGlite()
@@ -71,5 +71,20 @@ describe('database rules', { timeout: 30000 }, () => {
     await pg.exec(`insert into reminder (id, pivot_id, on_id, fire_at, body) values ('x:now', 'p1', '${crypto.randomUUID()}', now(), 'Hodges 4 should be around now.')`)
     await pg.exec(`update reminder set fire_at = now() + interval '1 hour'`)
     expect((await pg.query('select * from reminder')).rows.length).toBe(1)
+  })
+
+  it('viewers read everything but add no entries or reminders', async () => {
+    const pg = await setup()
+    await as(pg, 'office@farm.test', 'otp'); await pg.query('select claim_office()')
+    await pg.exec(`insert into person (id, data) values ('v1', '{"name":"County agent","role":"viewer","email":"Agent@County.test"}')`)
+    await as(pg, 'agent@county.test', 'otp')
+    expect((await pg.query('select * from person')).rows.length).toBe(1)
+    await expect(pg.exec(entry())).rejects.toThrow()
+    await expect(pg.exec(`insert into push_device (endpoint, keys) values ('https://push.example/2', '{}')`)).rejects.toThrow()
+    await as(pg, 'crew@farm.test', 'password')
+    await pg.exec(entry())
+    await as(pg, 'office@farm.test', 'otp')
+    await pg.exec(entry())
+    expect((await pg.query('select * from entry')).rows.length).toBe(2)
   })
 })
