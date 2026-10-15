@@ -2,7 +2,7 @@ import { useLiveQuery } from 'dexie-react-hooks'
 import { useMemo, useState } from 'react'
 import { db, setSetting } from '../db'
 import { applyView, buildReport, REPORTS, toCSV, toXlsx, type Filters, type View } from '../reports/reports'
-import { useNav } from './common'
+import { CropBar, Head, useNav } from './common'
 
 // The one-file preview runs in a sandbox that blocks downloads and printing.
 const PREVIEW = import.meta.env.MODE === 'single'
@@ -39,8 +39,8 @@ export function Reports() {
   }
   return (
     <div className="page wide">
-      <h1 className="lt">Reports</h1>
-      <p className="sub">Pick a report, filter it, and export it. Every report has the same layout.</p>
+      <Head title="Reports" sub="Pick a report, filter it, and export it" />
+      <CropBar />
       {saved.length > 0 && <div className="filters">{saved.map((s) => (
         <span key={s.name} className="chipbtn">
           <button onClick={() => { setId(s.id); setF({ ...f, ...s.filters }); setView(s.view) }}>{s.name}</button>

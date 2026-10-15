@@ -157,10 +157,23 @@ async function pushMaster(who: string): Promise<number> {
       n += batch.length
     }
   }
-  // Office and manager people with an email can sign in by link as office.
-  const office = (await db.people.toArray()).filter((p) => p.email && p.role !== 'crew').map((p) => ({ email: p.email!.trim().toLowerCase() }))
+  // Office and manager people with an email can sign in by link as office (viewers never).
+  const office = (await db.people.toArray()).filter((p) => p.email && (p.role === 'office' || p.role === 'manager')).map((p) => ({ email: p.email!.trim().toLowerCase() }))
   if (office.length) await supabase!.from('office_user').upsert(office, { ignoreDuplicates: true })
   return n
+}
+
+/** A crew phone sends up a profile someone made on it ("I'm new here"), so the office and other phones
+ * see them. Only new crew profiles; the server refuses anything else from a crew login. */
+async function pushNewCrew(who: string): Promise<number> {
+  const sent = await getSetting<Record<string, string>>('sent:person', {})
+  const mine = (await db.people.toArray()).filter((p) => p.role === 'crew' && !(p.id in sent))
+  if (!mine.length) return 0
+  const { error } = await supabase!.from('person').upsert(mine.map((p) => ({ id: p.id, data: p, updated_by: who })), { onConflict: 'id', ignoreDuplicates: true })
+  if (error) throw new Error(`person: ${error.message}`)
+  for (const p of mine) sent[p.id] = fingerprint(p)
+  await setSetting('sent:person', sent)
+  return mine.length
 }
 
 /** Removing a person on the office device also removes them on every other phone. */
@@ -168,6 +181,21 @@ export async function removePerson(id: string) {
   await db.people.delete(id)
   if (supabase && (await getSetting('officeLogin', false)) && !(await getSetting('demo', false))) {
     await supabase.from('person').delete().eq('id', id)
+  }
+}
+
+/** Office: email invite, office rights and removing a login (netlify/functions/users.mts). */
+export async function manageLogin(action: 'invite' | 'role' | 'remove', email: string, role?: string): Promise<string | null> {
+  if (!supabase) return 'The farm account is not set up yet, so email sign-in is off. Saved on this device.'
+  if (await getSetting('demo', false)) return null
+  const session = await currentSession()
+  if (!session || !(await getSetting('officeLogin', false))) return 'Sign in as the office first (Settings, Connections).'
+  try {
+    const res = await fetch('/.netlify/functions/users', { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${session.access_token}` }, body: JSON.stringify({ action, email, role, redirectTo: location.origin + location.pathname }) })
+    const out = await res.json().catch(() => ({ error: `Error ${res.status}` }))
+    return res.ok && !out.error ? null : out.error ?? `Error ${res.status}`
+  } catch {
+    return 'No signal. Try again when the phone is online.'
   }
 }
 
@@ -197,6 +225,7 @@ async function doSync(): Promise<SyncResult> {
     if (rows.length) await db.entries.bulkPut(rows.map(fromRow))
     r.received += rows.length
     if (office) r.listsSent = await pushMaster(session.user.email ?? 'office')
+    else r.listsSent = await pushNewCrew(session.user.email ?? 'crew')
     await setSetting('lastSync', new Date().toISOString())
   } catch (e: any) {
     r.error = e?.message ?? String(e)

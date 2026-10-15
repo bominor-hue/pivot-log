@@ -2,7 +2,7 @@ import { useLiveQuery } from 'dexie-react-hooks'
 import { useEffect, useState } from 'react'
 import type { Session } from '@supabase/supabase-js'
 import { db, getSetting, setSetting } from '../db'
-import { clearAll, loadDemo } from '../domain/farm'
+import { loadDemo } from '../domain/farm'
 import { readBoundaries, type Shape } from '../import/boundaries'
 import { applyFields, parseFieldRows, planFields, type FieldPlan } from '../import/fields'
 import { applyPivotInfo, isPivotInfoHeader, planPivotInfo, type PivotPlan } from '../import/pivotInfo'
@@ -11,8 +11,8 @@ import { importWeather } from '../import/weather'
 import { applyAgSense, planAgSense, type AgPlan } from '../import/agsense'
 import { importProbes } from '../import/probes'
 import { crewLogin, currentSession, emailCode, emailLink, logout, supabase, syncNow } from '../sync'
+import { makeReminderKeys, pushState, turnOffPush, turnOnPush, type PushState } from '../push'
 import { Seg, useNav } from './common'
-import { People } from './SignIn'
 
 function Counts({ found, matched, isNew, needsLook }: { found: number; matched: number; isNew: number; needsLook: number }) {
   return <div className="tiles" style={{ marginTop: 10 }}>
@@ -138,34 +138,47 @@ export function ImportScreen() {
   )
 }
 
-export function Settings({ onMe, signOut, canAdmin }: { onMe: (name: string) => void; signOut: () => void; canAdmin: boolean }) {
-  const { me, state, toast } = useNav()
-  const hasPeople = useLiveQuery(() => db.people.count(), [], 0) > 0
-  const [name, setName] = useState(me)
-  const [asOf, setAsOf] = useState(state.asOf)
-  const [sure, setSure] = useState(false)
-  const waiting = useLiveQuery(() => db.entries.where('synced').equals(0).count(), [], 0)
-  return (
-    <div className="page">
-      <h1 className="lt">Settings</h1>
-      <div className="card form">
-        {hasPeople ? <div className="row"><label>Signed in as</label><b>{me}</b></div>
-          : <div className="row"><label htmlFor="me">Your name</label><input id="me" value={name} onChange={(e) => setName(e.target.value)} onBlur={() => { setSetting('me', name); onMe(name) }} placeholder="Shown on every entry" /></div>}
-        <div className="row"><label>Water balance as of</label><input type="date" value={asOf} onChange={(e) => { setAsOf(e.target.value); setSetting('asOf', e.target.value || null) }} /></div>
-      </div>
-      <p className="note">Leave "as of" on today for the season. The demo sets it to July 16, 2026.</p>
-      {hasPeople && <button className="cta sec2" onClick={signOut}>Switch person</button>}
-      {canAdmin && <People />}
-      <FarmAccount waiting={waiting} />
-      {canAdmin && <><div className="sec">Reset</div>
-      <button className="cta off" onClick={() => (sure ? clearAll() : setSure(true))}>{sure ? 'Tap again to erase everything' : 'Erase this device'}</button>
-      {sure && <p className="note warn">Entries not yet sent will be lost.</p>}</>}
-    </div>
-  )
+/** Lap reminders on a locked phone. The office sets up the farm's keys once. */
+export function Reminders({ office }: { office: boolean }) {
+  const { toast, me } = useNav()
+  const [state, setState] = useState<PushState | null>(null)
+  const [busy, setBusy] = useState(false)
+  const [keys, setKeys] = useState<{ publicKey: string; privateKey: string } | null>(null)
+  useEffect(() => { pushState().then(setState) }, [])
+  if (!state) return null
+  const copy = (v: string) => navigator.clipboard?.writeText(v).then(() => toast('Copied'), () => {})
+  const flip = async () => {
+    setBusy(true)
+    const err = state === 'on' ? (await turnOffPush(), null) : await turnOnPush(me)
+    setBusy(false)
+    if (err) toast(err)
+    setState(await pushState())
+  }
+  return <>
+    <div className="sec">Lap reminders</div>
+    {state === 'not-set-up' ? (office ? <>
+      <p className="note">Reminders that reach a locked phone need the farm's reminder keys, made once here and kept in Netlify.</p>
+      {!keys ? <button className="cta sec2" onClick={async () => setKeys(await makeReminderKeys())}>Make reminder keys</button> : <>
+        <div className="card kv">
+          <span>VITE_VAPID_PUBLIC_KEY</span><b style={{ wordBreak: 'break-all' }}>{keys.publicKey} <button className="btn sm" onClick={() => copy(keys.publicKey)}>Copy</button></b>
+          <span>VAPID_PRIVATE_KEY</span><b style={{ wordBreak: 'break-all' }}>{keys.privateKey} <button className="btn sm" onClick={() => copy(keys.privateKey)}>Copy</button></b>
+        </div>
+        <p className="note">In Netlify, open pivot-log, then Project configuration, then Environment variables, and add these two, plus SUPABASE_SERVICE_KEY (the Supabase secret key). Then go to Deploys and choose Trigger deploy. Don't send the private key anywhere else. If you leave this screen first, just make new keys.</p>
+      </>}
+    </> : <p className="note">Reminders that reach a locked phone are not set up yet. The office sets them up here.</p>)
+    : state === 'add-to-home' ? <p className="note">On an iPhone, reminders only work from the Home Screen app. In Safari tap Share, then Add to Home Screen, and open Pivot Log from there.</p>
+    : state === 'unsupported' ? <p className="note">This browser can't show reminders on a locked screen.</p>
+    : state === 'blocked' ? <p className="note warn">Notifications are blocked for Pivot Log. Allow them in the phone's settings, then come back here.</p>
+    : <>
+      <div className="card kv"><span>On this phone</span><b>{state === 'on' ? 'On' : 'Off'}</b></div>
+      <button className={state === 'on' ? 'cta sec2' : 'cta'} disabled={busy} onClick={flip}>{state === 'on' ? 'Turn reminders off on this phone' : 'Turn on lap reminders'}</button>
+      <p className="note">An hour before a running pivot should make it around, and when it should be around, every phone with reminders on gets a notice, even locked.</p>
+    </>}
+  </>
 }
 
 /** Sign this device in to the farm's hosted database, and show what has been sent. */
-function FarmAccount({ waiting }: { waiting: number }) {
+export function FarmAccount({ waiting }: { waiting: number }) {
   const { toast } = useNav()
   const [session, setSession] = useState<Session | null>(null)
   const [kind, setKind] = useState<'office' | 'crew'>('office')
@@ -211,6 +224,7 @@ function FarmAccount({ waiting }: { waiting: number }) {
       {demo && <p className="note warn">Demo data is loaded, so nothing is sent or received. Erase this device to start with the farm's data.</p>}
       <button className="cta sec2" disabled={busy} onClick={async () => { setBusy(true); const r = await syncNow(); setBusy(false); toast(r.error ?? `Sent ${r.sent}, received ${r.received}${r.listsSent ? `, ${r.listsSent} list rows updated` : ''}`) }}>Sync now</button>
       <button className="cta sec2" onClick={() => logout()}>Sign this device out</button>
+      <Reminders office={!!office} />
       {waiting > 0 && <p className="note warn">Sign out only after unsent entries have gone up.</p>}
     </> : <>
       <div className="card form">

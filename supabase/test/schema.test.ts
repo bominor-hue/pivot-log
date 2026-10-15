@@ -11,7 +11,7 @@ create function auth.jwt() returns jsonb language sql stable as $$ select coales
 create function auth.uid() returns uuid language sql stable as $$ select nullif(auth.jwt() ->> 'sub', '')::uuid $$;
 grant usage on schema public, auth to authenticated;
 `
-const sql = readFileSync(new URL('../migrations/0001_init.sql', import.meta.url), 'utf8')
+const sql = ['0001_init.sql', '0002_reminders.sql', '0003_viewers.sql'].map((f) => readFileSync(new URL(`../migrations/${f}`, import.meta.url), 'utf8')).join('\n')
 
 async function setup() {
   const pg = new PGlite()
@@ -62,5 +62,39 @@ describe('database rules', { timeout: 30000 }, () => {
     await pg.exec(`update field set data = '{"x":1}'`)
     const b = (await pg.query<{ u: string }>(`select updated_at::text u from field`)).rows[0].u
     expect(b > a).toBe(true)
+  })
+
+  it('crew phones turn reminders on and file lap reminders', async () => {
+    const pg = await setup()
+    await as(pg, 'crew@farm.test', 'password')
+    await pg.exec(`insert into push_device (endpoint, keys, who_name) values ('https://push.example/1', '{"p256dh":"a","auth":"b"}', 'Juan')`)
+    await pg.exec(`insert into reminder (id, pivot_id, on_id, fire_at, body) values ('x:now', 'p1', '${crypto.randomUUID()}', now(), 'Hodges 4 should be around now.')`)
+    await pg.exec(`update reminder set fire_at = now() + interval '1 hour'`)
+    expect((await pg.query('select * from reminder')).rows.length).toBe(1)
+  })
+
+  it('viewers read everything but add no entries or reminders', async () => {
+    const pg = await setup()
+    await as(pg, 'office@farm.test', 'otp'); await pg.query('select claim_office()')
+    await pg.exec(`insert into person (id, data) values ('v1', '{"name":"County agent","role":"viewer","email":"Agent@County.test"}')`)
+    await as(pg, 'agent@county.test', 'otp')
+    expect((await pg.query('select * from person')).rows.length).toBe(1)
+    await expect(pg.exec(entry())).rejects.toThrow()
+    await expect(pg.exec(`insert into push_device (endpoint, keys) values ('https://push.example/2', '{}')`)).rejects.toThrow()
+    await as(pg, 'crew@farm.test', 'password')
+    await pg.exec(entry())
+    await as(pg, 'office@farm.test', 'otp')
+    await pg.exec(entry())
+    expect((await pg.query('select * from entry')).rows.length).toBe(2)
+  })
+
+  it('crew phones can add a new crew profile, nothing more', async () => {
+    const pg = await setup()
+    await as(pg, 'office@farm.test', 'otp'); await pg.query('select claim_office()')
+    await as(pg, 'crew@farm.test', 'password')
+    await pg.exec(`insert into person (id, data) values ('c1', '{"name":"Juan","role":"crew"}')`)
+    await expect(pg.exec(`insert into person (id, data) values ('c2', '{"name":"Me","role":"office"}')`)).rejects.toThrow()
+    await pg.exec(`update person set data = '{"name":"Juan","role":"office"}'`) // no update rule: changes nothing
+    expect((await pg.query<{ r: string }>(`select data ->> 'role' r from person`)).rows).toEqual([{ r: 'crew' }])
   })
 })

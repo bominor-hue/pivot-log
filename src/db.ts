@@ -51,8 +51,14 @@ export interface ImportLog { id: string; kind: string; fileName: string; at: str
 export interface Setting { key: string; value: any }
 /** A probe reading at a check site, as % of the soil's available water used (same scale as the model). */
 export interface ProbeReading { id: string; fieldId: string; date: string; pctUsed: number; source: string }
-/** Crew member. The PIN is stored hashed; the office sets it in Settings. */
-export interface Person { id: string; name: string; role: 'crew' | 'manager' | 'office'; pinHash: string | null; email?: string | null /* office and managers: signs in by email link */ }
+/** Someone who uses the app. The PIN is stored hashed; the office sets it in Settings, Users.
+ * Office, managers and viewers sign in by email; viewers only look (no entries). */
+export interface Person {
+  id: string; name: string; role: 'crew' | 'manager' | 'office' | 'viewer'; pinHash: string | null
+  email?: string | null
+  owner?: boolean // the first office person; can't be removed
+  invitedAt?: string | null // when the email invite went out
+}
 
 class PivotLogDB extends Dexie {
   farms!: Table<Farm, string>
