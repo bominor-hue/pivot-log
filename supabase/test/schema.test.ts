@@ -11,7 +11,7 @@ create function auth.jwt() returns jsonb language sql stable as $$ select coales
 create function auth.uid() returns uuid language sql stable as $$ select nullif(auth.jwt() ->> 'sub', '')::uuid $$;
 grant usage on schema public, auth to authenticated;
 `
-const sql = ['0001_init.sql', '0002_reminders.sql', '0003_viewers.sql'].map((f) => readFileSync(new URL(`../migrations/${f}`, import.meta.url), 'utf8')).join('\n')
+const sql = ['0001_init.sql', '0002_reminders.sql', '0003_viewers.sql', '0004_clients.sql'].map((f) => readFileSync(new URL(`../migrations/${f}`, import.meta.url), 'utf8')).join('\n')
 
 async function setup() {
   const pg = new PGlite()
@@ -96,5 +96,14 @@ describe('database rules', { timeout: 30000 }, () => {
     await expect(pg.exec(`insert into person (id, data) values ('c2', '{"name":"Me","role":"office"}')`)).rejects.toThrow()
     await pg.exec(`update person set data = '{"name":"Juan","role":"office"}'`) // no update rule: changes nothing
     expect((await pg.query<{ r: string }>(`select data ->> 'role' r from person`)).rows).toEqual([{ r: 'crew' }])
+  })
+
+  it('only the office adds or renames clients; everyone reads them', async () => {
+    const pg = await setup()
+    await as(pg, 'office@farm.test', 'otp'); await pg.query('select claim_office()')
+    await pg.exec(`insert into client (id, data) values ('default', '{"name":"JA Minor Family Farms"}')`)
+    await as(pg, 'crew@farm.test', 'password')
+    expect((await pg.query('select * from client')).rows.length).toBe(1)
+    await expect(pg.exec(`insert into client (id, data) values ('c2', '{"name":"Other"}')`)).rejects.toThrow()
   })
 })

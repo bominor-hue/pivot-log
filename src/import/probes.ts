@@ -1,10 +1,11 @@
+import { clientScope } from '../domain/client'
 import { db, uid } from '../db'
 import { norm, pick, toDate, toNum, type Row } from './read'
 
 // Probe readings from the 2-3 check sites: CSV with date, field, and either % of available water used
 // or % full (most probe exports show "% full"; it is converted to % used to sit on the model's scale).
 export async function importProbes(rows: Row[], fileName: string, who: string): Promise<string> {
-  const fields = new Map((await db.fields.toArray()).map((f) => [norm(f.name), f.id]))
+  const fields = new Map((await clientScope()).fields.map((f) => [norm(f.name), f.id]))
   let n = 0, skipped = 0
   const out = []
   for (const r of rows) {

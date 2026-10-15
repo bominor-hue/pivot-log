@@ -10,22 +10,25 @@ import { CropGlyph, SyncIcon } from './brand'
 import { Chevron, useNav, type SettingsTab } from './common'
 import { FarmAccount } from './Import'
 import { Users } from './Users'
+import { ClientsTab } from './Clients'
 
-// Settings in three parts: Users (people and roles), Connections (what feeds the app and when it last
+// Settings in four parts: Users (people and roles), Clients (whose farms the app shows), Connections (what feeds the app and when it last
 // ran, plus this phone's sign-in), and Pivot Info (every pivot's details in one table).
 
 export function Settings({ tab, onMe, signOut, canAdmin }: { tab?: SettingsTab; onMe: (name: string) => void; signOut: () => void; canAdmin: boolean }) {
-  const { state } = useNav()
+  const { state, clients = [] } = useNav()
+  const clientName = clients.length > 1 ? clients.find((c) => c.id === state.clientId)?.name : null
   const [t, setT] = useState<SettingsTab>(tab ?? 'users')
   return (
     <div className="page">
-      <div className="hd"><div><h1>Settings</h1><small>{state.farms.length} farms · {state.pivots.length} pivots · {state.fields.length} fields</small></div></div>
+      <div className="hd"><div><h1>Settings</h1><small>{clientName ? `${clientName} · ` : ''}{state.farms.length} farms · {state.pivots.length} pivots · {state.fields.length} fields</small></div></div>
       <div className="seg big" role="group" aria-label="Settings section">
-        {([['users', 'Users'], ['conn', 'Connections'], ['pivots', 'Pivot Info']] as [SettingsTab, string][]).map(([k, l]) =>
+        {([['users', 'Users'], ['clients', 'Clients'], ['conn', 'Connections'], ['pivots', 'Pivot Info']] as [SettingsTab, string][]).map(([k, l]) =>
           <button key={k} type="button" className={t === k ? 'on' : ''} aria-pressed={t === k} onClick={() => setT(k)}>{l}</button>)}
       </div>
       <div className="enter" key={t}>
         {t === 'users' && <UsersTab canAdmin={canAdmin} onMe={onMe} signOut={signOut} />}
+        {t === 'clients' && <ClientsTab canAdmin={canAdmin} />}
         {t === 'conn' && <Connections canAdmin={canAdmin} />}
         {t === 'pivots' && <PivotInfo canAdmin={canAdmin} />}
       </div>

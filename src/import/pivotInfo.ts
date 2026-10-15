@@ -1,3 +1,4 @@
+import { clientScope } from '../domain/client'
 import { db, uid, type Pivot } from '../db'
 import { setProfile } from '../domain/pivot'
 import { norm, toNum, type Row } from './read'
@@ -55,7 +56,7 @@ export interface PivotPlan { items: PivotPlanItem[]; found: number; matched: num
 export const isPivotInfoHeader = (cells: string[]) => cells.some((c) => c.trim() === 'System ID')
 
 export async function planPivotInfo(rows: Row[]): Promise<PivotPlan> {
-  const pivots = await db.pivots.toArray()
+  const pivots = (await clientScope()).pivots // names match only within the picked client
   const byName = new Map(pivots.map((p) => [norm(p.name), p]))
   const byAg = new Map(pivots.filter((p) => p.agsenseName).map((p) => [norm(p.agsenseName), p]))
   const cell = (r: Row, col: string) => { const k = Object.keys(r).find((k) => norm(k) === norm(col)); return k ? r[k] : null }
@@ -88,13 +89,14 @@ export async function planPivotInfo(rows: Row[]): Promise<PivotPlan> {
 export async function applyPivotInfo(plan: PivotPlan, fileName: string, who: string): Promise<string> {
   const at = new Date().toISOString()
   let changed = 0
+  const scope = await clientScope()
   await db.transaction('rw', [db.pivots, db.farms, db.imports], async () => {
-    const farms = new Map((await db.farms.toArray()).map((f) => [norm(f.name), f]))
+    const farms = new Map(scope.farms.map((f) => [norm(f.name), f]))
     for (const it of plan.items) {
       let p = it.existing ? await db.pivots.get(it.existing.id) : undefined
       if (!p) {
         let farm = farms.get(norm(it.farm || 'Unassigned'))
-        if (!farm) { farm = { id: uid(), name: it.farm || 'Unassigned' }; await db.farms.add(farm); farms.set(norm(farm.name), farm) }
+        if (!farm) { farm = { id: uid(), name: it.farm || 'Unassigned', clientId: scope.clientId }; await db.farms.add(farm); farms.set(norm(farm.name), farm) }
         p = { id: uid(), farmId: farm.id, name: it.system, agsenseName: it.agsense, profile: {} }
       }
       if (it.agsense && !p.agsenseName) p.agsenseName = it.agsense

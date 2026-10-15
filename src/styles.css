@@ -224,6 +224,7 @@ tr.sub td{font-weight:600;background:var(--fill)}
 .hd{display:flex;justify-content:space-between;align-items:center;gap:12px;margin:10px 2px 12px}
 .hd h1{font:700 32px/1.1 var(--round);letter-spacing:-.02em;margin:0;text-wrap:balance}
 .hd small{display:block;color:var(--fg2);font-size:13.5px;margin-top:3px}
+.clientchip{display:inline-flex;align-items:center;gap:6px;max-width:100%;margin:0 0 4px;padding:4px 10px;border-radius:999px;font:600 13px/1.2 var(--round);color:var(--water);background:var(--glass);border:1px solid var(--glass-brd);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .av{width:40px;height:40px;flex:none;border-radius:50%;display:grid;place-items:center;font:700 16px/1 var(--round);color:var(--water);background:var(--glass);-webkit-backdrop-filter:blur(22px) saturate(1.8);backdrop-filter:blur(22px) saturate(1.8);border:1px solid var(--glass-brd);box-shadow:var(--glass-sh)}
 .link{color:var(--water);font-weight:600;font-size:inherit}
 .dim{color:var(--fg3)}

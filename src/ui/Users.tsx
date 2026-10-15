@@ -4,6 +4,7 @@ import { db, getSetting, setSetting, uid, type Person } from '../db'
 import { manageLogin, removePerson, syncNow } from '../sync'
 import { Sheet, useNav } from './common'
 import { Avatar, ROLE_LABEL, hashPin } from './SignIn'
+import { ClientAccess } from './Clients'
 
 // Settings, Users: invite people, set their role, reset a PIN, remove access.
 //   Crew    turn pivots on and off and log runs; sign in with a 4-digit PIN on a farm phone.
@@ -70,7 +71,7 @@ function Invite({ people, onClose }: { people: Person[]; onClose: () => void }) 
     }
     return <Sheet onClose={onClose}>
       <h2>{first ? 'Add yourself' : 'Invite someone'}</h2>
-      <p className="sub">{first ? "You'll be the owner. Pick a PIN for this phone." : 'Everyone sees every farm for now.'}</p>
+      <p className="sub">{first ? "You'll be the owner. Pick a PIN for this phone." : 'They see every client until you pick theirs on their name.'}</p>
       <label className="fld"><span>Name</span><input value={name} onChange={(e) => setName(e.target.value)} placeholder="First and last name" autoComplete="off" /></label>
       {!first && <div className="roles" role="radiogroup" aria-label="Role">{ROLES.map(([r, d]) => (
         <button key={r} type="button" role="radio" className="ropt" aria-checked={role === r} onClick={() => setRole(r)}><i /><div><b>{ROLE_LABEL[r]}</b><span>{d}</span></div></button>))}</div>}
@@ -112,6 +113,7 @@ function PersonSheet({ p, self, canAdmin, onClose }: { p: Person; self: boolean;
       <p className="sub">{p.owner ? "The owner. Can't be removed here." : line(p)}</p>
       {edit && <div className="seg" role="group" aria-label="Role" style={{ margin: '4px 0 12px' }}>{(['crew', 'office', 'viewer'] as Role[]).map((r) => (
         <button key={r} type="button" className={p.role === r || (r === 'office' && p.role === 'manager') ? 'on' : ''} onClick={() => setRole(r)}>{ROLE_LABEL[r]}</button>))}</div>}
+      {edit && <ClientAccess p={p} />}
       {(edit || self) && <>
         <label className="fld"><span>New 4-digit PIN</span><input inputMode="numeric" maxLength={4} value={pin} onChange={(e) => setPin(e.target.value.replace(/\D/g, ''))} placeholder="••••" autoComplete="off" /></label>
         <button className="cta sec2" disabled={!/^\d{4}$/.test(pin)} onClick={async () => { await db.people.put({ ...p, pinHash: await hashPin(p.name, pin) }); onClose(); toast(`New PIN saved for ${p.name}`) }}>Save new PIN</button>

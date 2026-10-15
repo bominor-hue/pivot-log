@@ -1,11 +1,11 @@
 import { createContext, useContext, useEffect, useState, type ReactNode } from 'react'
 import type { FarmState, FieldView, PivotView } from '../domain/farm'
-import type { Entry } from '../db'
+import type { Client, Entry } from '../db'
 import type { Run } from '../domain/runs'
 import { CROP_FILTERS, type CropFilter } from '../domain/crop'
 import { CropGlyph } from './brand'
 
-export type SettingsTab = 'users' | 'conn' | 'pivots'
+export type SettingsTab = 'users' | 'clients' | 'conn' | 'pivots'
 export type Route = { kind: 'field'; id: string } | { kind: 'pivot'; id: string } | { kind: 'import' } | { kind: 'settings'; tab?: SettingsTab } | { kind: 'welcome' }
 export interface Nav {
   push: (r: Route) => void
@@ -17,6 +17,8 @@ export interface Nav {
   crop?: CropFilter
   setCrop?: (c: CropFilter) => void
   canAdmin?: boolean
+  clients?: Client[] // the clients this person can pick
+  openClients?: () => void
 }
 export const NavCtx = createContext<Nav>(null as any)
 export const useNav = () => useContext(NavCtx)
@@ -145,12 +147,16 @@ export function CropBar() {
   )
 }
 
-/** Large page title with the person button on the right (opens Settings). */
+/** Large page title with the person button on the right (opens Settings). With more than one client,
+ * the client's name sits above the title; tap it to switch. */
 export function Head({ title, sub }: { title: string; sub?: ReactNode }) {
-  const { me, push } = useNav()
+  const { me, push, clients = [], state, openClients } = useNav()
+  const client = clients.length > 1 ? clients.find((c) => c.id === state.clientId) : null
   return (
     <div className="hd">
-      <div style={{ minWidth: 0 }}><h1>{title}</h1>{sub && <small>{sub}</small>}</div>
+      <div style={{ minWidth: 0 }}>
+        {client && openClients && <button className="clientchip" onClick={openClients} aria-label={`Client: ${client.name}. Switch client`}>{client.name}<svg width="10" height="7" viewBox="0 0 10 7" aria-hidden="true"><path d="M1 1.5l4 4 4-4" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" /></svg></button>}
+        <h1>{title}</h1>{sub && <small>{sub}</small>}</div>
       <button className="av" onClick={() => push({ kind: 'settings' })} aria-label="Settings">{(me || '?').trim()[0]?.toUpperCase() ?? '?'}</button>
     </div>
   )

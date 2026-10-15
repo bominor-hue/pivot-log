@@ -1,7 +1,8 @@
-import { db, getSetting, uid, type CropSeason, type Entry, type Farm, type Field, type Pivot, type ProbeReading } from '../db'
+import { DEFAULT_CLIENT, db, getSetting, uid, type CropSeason, type Entry, type Farm, type Field, type Pivot, type ProbeReading } from '../db'
 import { advise, isCrop, runBalance, type Advice, type BalanceDay } from '../model/waterBalance'
 import { buildRuns, dailyApplied, learnLapHours, type Run } from './runs'
 import { hoursPerPass, num } from './pivot'
+import { clientOf, listClients, pickClient } from './client'
 
 // Everything a screen needs, computed from the local database: fields with today's water balance,
 // pivots with their runs. Small enough (a farm is ~100 fields) to recompute on every change.
@@ -14,12 +15,20 @@ export interface FieldView {
 export interface PivotView { pivot: Pivot; farm: Farm; fields: Field[]; acres: number | null; runs: Run[]; running: Run | null; lastRun: Run | null
   lapHours100: { hours: number; source: string } | null // hours per lap at 100%: dealer chart, else learned from laps
 }
-export interface FarmState { asOf: string; year: number; farms: Farm[]; fields: FieldView[]; pivots: PivotView[]; entries: Entry[]; weatherFrom: string | null; weatherTo: string | null; weatherSource: string }
+export interface FarmState { clientId: string; asOf: string; year: number; farms: Farm[]; fields: FieldView[]; pivots: PivotView[]; entries: Entry[]; weatherFrom: string | null; weatherTo: string | null; weatherSource: string }
 
 export async function loadState(): Promise<FarmState> {
-  const [farms, fields, pivots, seasons, entries, weather, probes] = await Promise.all([
+  const [allFarms, allFields, allPivots, seasons, allEntries, weather, allProbes, clients, picked] = await Promise.all([
     db.farms.toArray(), db.fields.toArray(), db.pivots.toArray(), db.cropSeasons.toArray(), db.entries.toArray(), db.weather.orderBy('date').toArray(), db.probes.toArray(),
+    listClients(), getSetting<string | null>('clientId', null),
   ])
+  // Only the picked client's farms, and the fields, pivots, entries and probe readings under them.
+  const clientId = pickClient(clients, picked)
+  const farms = allFarms.filter((f) => clientOf(f) === clientId)
+  const farmIds = new Set(farms.map((f) => f.id))
+  const fields = allFields.filter((f) => farmIds.has(f.farmId)), pivots = allPivots.filter((p) => farmIds.has(p.farmId))
+  const pivotIds = new Set(pivots.map((p) => p.id)), fieldIds = new Set(fields.map((f) => f.id))
+  const entries = allEntries.filter((e) => pivotIds.has(e.pivotId)), probes = allProbes.filter((x) => fieldIds.has(x.fieldId))
   const today = new Date().toISOString().slice(0, 10)
   const asOfSetting = await getSetting<string | null>('asOf', null)
   const asOf = asOfSetting || today
@@ -71,7 +80,7 @@ export async function loadState(): Promise<FarmState> {
   }).sort((a, b) => a.field.name.localeCompare(b.field.name, undefined, { numeric: true }))
 
   const wsrc = weather.at(-1)?.source ?? ''
-  return { asOf, year, farms: farms.sort((a, b) => a.name.localeCompare(b.name)), fields: fviews, pivots: pviews, entries, weatherFrom: weather[0]?.date ?? null, weatherTo: weather.at(-1)?.date ?? null, weatherSource: wsrc }
+  return { clientId, asOf, year, farms: farms.sort((a, b) => a.name.localeCompare(b.name)), fields: fviews, pivots: pviews, entries, weatherFrom: weather[0]?.date ?? null, weatherTo: weather.at(-1)?.date ?? null, weatherSource: wsrc }
 }
 
 /** Percent timer of the pivot's last ON (100 if none), used to size the lap for the recommendation. */
@@ -83,10 +92,12 @@ function state_lastPct(entries: Entry[], pivotId: string): number {
 /** Load the JA Minor 2026 demo farm (fields, boundaries, soils, weather) into an empty app. */
 export async function loadDemo(url = './demo/ja_minor_2026.json') {
   const demo = await (await fetch(url)).json()
-  await db.transaction('rw', [db.farms, db.fields, db.pivots, db.cropSeasons, db.weather, db.rain, db.imports, db.settings], async () => {
+  await db.transaction('rw', [db.clients, db.farms, db.fields, db.pivots, db.cropSeasons, db.weather, db.rain, db.imports, db.settings], async () => {
+    await db.clients.put({ id: DEFAULT_CLIENT, name: 'JA Minor Family Farms' })
+    await db.settings.put({ key: 'clientId', value: DEFAULT_CLIENT })
     const farms = new Map<string, string>()
     for (const name of new Set<string>([...demo.pivots.map((p: any) => p.farm), ...demo.fields.map((f: any) => f.farm)])) {
-      const id = uid(); farms.set(name, id); await db.farms.add({ id, name })
+      const id = uid(); farms.set(name, id); await db.farms.add({ id, name, clientId: DEFAULT_CLIENT })
     }
     const pid = new Map<string, string>()
     const at = new Date().toISOString()

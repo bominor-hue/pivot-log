@@ -7,7 +7,11 @@ import type { Crop } from './model/waterBalance'
 
 export type Geometry = { type: 'Polygon' | 'MultiPolygon'; coordinates: any }
 
-export interface Farm { id: string; name: string }
+/** Whose fields and pivots these are. Every farm belongs to one client; fields and pivots belong to farms.
+ * Farms made before clients existed have no clientId and belong to DEFAULT_CLIENT. */
+export interface Client { id: string; name: string }
+export const DEFAULT_CLIENT = 'default'
+export interface Farm { id: string; name: string; clientId?: string | null }
 export interface Field {
   id: string; farmId: string; name: string; pivotId: string | null
   fsn?: string | null; county?: string | null; boundary?: Geometry | null; boundaryAcres?: number | null
@@ -58,6 +62,7 @@ export interface Person {
   email?: string | null
   owner?: boolean // the first office person; can't be removed
   invitedAt?: string | null // when the email invite went out
+  clientIds?: string[] | null // the clients they can pick; empty or missing means all
 }
 
 class PivotLogDB extends Dexie {
@@ -72,6 +77,7 @@ class PivotLogDB extends Dexie {
   settings!: Table<Setting, string>
   probes!: Table<ProbeReading, string>
   people!: Table<Person, string>
+  clients!: Table<Client, string>
   constructor() {
     super('pivot-log')
     this.version(1).stores({
@@ -86,6 +92,7 @@ class PivotLogDB extends Dexie {
       settings: 'key',
     })
     this.version(2).stores({ entries: 'id, pivotId, happenedAt, synced, how', probes: 'id, fieldId, date', people: 'id, name' })
+    this.version(3).stores({ clients: 'id, name' })
   }
 }
 

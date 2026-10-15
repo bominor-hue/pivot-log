@@ -115,3 +115,25 @@ describe('AgSense weekly import', () => {
     expect(h7.profile.agsenseReadsDry.value).toBe('yes')
   })
 })
+
+describe('clients', () => {
+  it('keeps each client to its own farms, fields and pivots', async () => {
+    const { addClient, listClients } = await import('../domain/client')
+    const { setSetting } = await import('../db')
+    const rows = parseFieldRows([{ Farm: 'Home', Field: 'North 1', Pivot: 'North 1', Crop: 'Corn', Acres: '120', 'Plant date': '4/1/2026' }])
+    await applyFields(await planFields(rows, [], 2026), 'a.csv', 'Bo')
+    expect((await listClients()).map((c) => c.name)).toEqual(['Main client']) // older farms land under the default client
+    const b = await addClient('Smith Farms')
+    const plan = await planFields(rows, [], 2026)
+    expect(plan.isNew).toBe(1) // the same field name under another client is a new field, not a match
+    await applyFields(plan, 'b.csv', 'Bo')
+    expect((await db.fields.count())).toBe(2)
+    const sb = await loadState()
+    expect(sb.clientId).toBe(b.id)
+    expect(sb.fields.length).toBe(1)
+    expect(sb.farms[0].clientId).toBe(b.id)
+    await setSetting('clientId', 'default')
+    const sa = await loadState()
+    expect(sa.fields.map((f) => f.farm.clientId)).toEqual(['default'])
+  })
+})
