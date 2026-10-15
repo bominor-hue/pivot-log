@@ -1,3 +1,5 @@
+-- People: viewers, and crew who add themselves.
+--
 -- Viewers: read-only people (county agent, NRCS, a landlord). They sign in by email like the office
 -- and see everything, but cannot add entries. A viewer is a person in the people list with role
 -- 'viewer' and their email; the office's device sends that list up.
@@ -18,3 +20,8 @@ drop policy push_device_rw on push_device;
 drop policy reminder_rw on reminder;
 create policy push_device_rw on push_device for all to authenticated using (not is_viewer()) with check (not is_viewer());
 create policy reminder_rw on reminder for all to authenticated using (not is_viewer()) with check (not is_viewer());
+
+-- Anyone on a crew phone can make their own crew profile ("I'm new here"); only the office changes
+-- roles or removes people.
+create policy person_self_add on person for insert to authenticated
+  with check (data ->> 'role' = 'crew' and not is_viewer());

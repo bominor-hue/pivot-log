@@ -5,15 +5,18 @@ import { num } from '../domain/pivot'
 import { currentSession } from '../sync'
 import { Count, Logo } from './brand'
 import { Chevron, useNav, type Route } from './common'
+import { ProfileForm } from './SignIn'
+import type { Person } from '../db'
 
 // First screen for the office until setup is done: "Welcome, Bo", five steps with what each one is
 // for, and the next one to do. "Skip for now" hides it; Settings, Users, Setup steps brings it back.
 
 interface Step { title: string; done: boolean; sub: string; status?: string; go: Route }
 
-export function Welcome({ onDone }: { onDone: () => void }) {
+export function Welcome({ onDone, onProfile }: { onDone: () => void; onProfile: (p: Person) => void }) {
   const { state, me, push } = useNav()
   const people = useLiveQuery(() => db.people.count(), [], 0)
+  const meSet = useLiveQuery(async () => { const id = (await db.settings.get('meId'))?.value; return !!id && !!(await db.people.get(id)) }, [], true)
   const [signedIn, setSignedIn] = useState(false)
   useEffect(() => { currentSession().then((s) => setSignedIn(!!s)) }, [])
   const acres = state.fields.reduce((s, f) => s + (f.season?.acres ?? 0), 0)
@@ -33,9 +36,11 @@ export function Welcome({ onDone }: { onDone: () => void }) {
     <div className="page">
       <div className="wel">
         <div className="mark"><Logo animate size={100} /></div>
-        <h1>Welcome{first ? `, ${first}` : ''}</h1>
-        <p>{n === 5 ? 'Everything is set up. You can come back here from Settings.' : `Let's get the farm ready. ${n ? `${n} ${n === 1 ? 'step' : 'steps'} done, ${5 - n} to go.` : 'Five steps, in this order.'}`}</p>
+        <h1>Welcome{first && meSet ? `, ${first}` : ''}</h1>
+        {!meSet ? <p>First, who are you? You'll be the owner of this farm's Pivot Log.</p> : <p>{n === 5 ? 'Everything is set up. You can come back here from Settings.' : `Let's get the farm ready. ${n ? `${n} ${n === 1 ? 'step' : 'steps'} done, ${5 - n} to go.` : 'Five steps, in this order.'}`}</p>}
       </div>
+      {!meSet && <ProfileForm onSaved={onProfile} />}
+      {meSet && <>
       <div className="prog" role="progressbar" aria-valuemin={0} aria-valuemax={5} aria-valuenow={n} aria-label={`${n} of 5 steps done`}><i style={{ width: `${(n / 5) * 100}%` }} /></div>
       <div className="card steps">{steps.map((s, i) => (
         <button key={s.title} className={'step' + (s.done ? ' done' : i === next ? ' next' : '')} onClick={() => push(s.go)}>
@@ -47,6 +52,7 @@ export function Welcome({ onDone }: { onDone: () => void }) {
       {next >= 0 && <button className="cta" onClick={() => push(steps[next].go)}>Continue: {steps[next].title}</button>}
       <button className="cta ghost" onClick={async () => { await setSetting('welcomeDone', true); onDone() }}>{n === 5 ? 'Go to Today' : 'Skip for now'}</button>
       {state.fields.length > 0 && <p className="note" style={{ textAlign: 'center' }}><Count to={state.pivots.length} /> pivots, <Count to={state.fields.length} /> fields so far.</p>}
+      </>}
     </div>
   )
 }

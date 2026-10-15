@@ -163,6 +163,19 @@ async function pushMaster(who: string): Promise<number> {
   return n
 }
 
+/** A crew phone sends up a profile someone made on it ("I'm new here"), so the office and other phones
+ * see them. Only new crew profiles; the server refuses anything else from a crew login. */
+async function pushNewCrew(who: string): Promise<number> {
+  const sent = await getSetting<Record<string, string>>('sent:person', {})
+  const mine = (await db.people.toArray()).filter((p) => p.role === 'crew' && !(p.id in sent))
+  if (!mine.length) return 0
+  const { error } = await supabase!.from('person').upsert(mine.map((p) => ({ id: p.id, data: p, updated_by: who })), { onConflict: 'id', ignoreDuplicates: true })
+  if (error) throw new Error(`person: ${error.message}`)
+  for (const p of mine) sent[p.id] = fingerprint(p)
+  await setSetting('sent:person', sent)
+  return mine.length
+}
+
 /** Removing a person on the office device also removes them on every other phone. */
 export async function removePerson(id: string) {
   await db.people.delete(id)
@@ -212,6 +225,7 @@ async function doSync(): Promise<SyncResult> {
     if (rows.length) await db.entries.bulkPut(rows.map(fromRow))
     r.received += rows.length
     if (office) r.listsSent = await pushMaster(session.user.email ?? 'office')
+    else r.listsSent = await pushNewCrew(session.user.email ?? 'crew')
     await setSetting('lastSync', new Date().toISOString())
   } catch (e: any) {
     r.error = e?.message ?? String(e)

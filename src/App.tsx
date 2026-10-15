@@ -87,7 +87,7 @@ export function App() {
   // The crop filter narrows the main tabs; a pivot, field or settings page always shows the whole farm.
   const nav = top ? full : { ...full, state: filterState(state, crop) }
   const title = top?.kind === 'field' ? 'Field' : top?.kind === 'pivot' ? 'Pivot' : top?.kind === 'import' ? 'Import' : top?.kind === 'settings' ? 'Settings' : top?.kind === 'welcome' ? 'Setup' : ''
-  const welcome = !top && canAdmin && !welcomeDone
+  const welcome = !top && canAdmin && (!welcomeDone || !people.length) // no one set up yet: make your profile first
 
   return (
     <NavCtx.Provider value={nav}>
@@ -99,8 +99,8 @@ export function App() {
         {top.kind === 'pivot' && <PivotDetail id={top.id} />}
         {top.kind === 'import' && (canAdmin ? <ImportScreen /> : <div className="page"><p className="note">Importing is for the office and managers. Ask the office to sign in.</p></div>)}
         {top.kind === 'settings' && <Settings key={top.tab ?? ''} tab={top.tab} onMe={setMe} canAdmin={canAdmin} signOut={async () => { await setSetting('meId', null); setStack([]) }} />}
-        {top.kind === 'welcome' && <Welcome onDone={() => setStack([])} />}
-      </> : welcome ? <Welcome onDone={() => {}} /> : <>
+        {top.kind === 'welcome' && <Welcome onDone={() => setStack([])} onProfile={(p) => { setMe(p.name); setRole(p.role) }} />}
+      </> : welcome ? <Welcome onDone={() => {}} onProfile={(p) => { setMe(p.name); setRole(p.role) }} /> : <>
         {tab === 'today' && <Today />}
         {tab === 'map' && <MapView />}
         {tab === 'log' && <Log />}

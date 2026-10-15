@@ -1,7 +1,7 @@
 import { useLiveQuery } from 'dexie-react-hooks'
 import { useEffect, useState } from 'react'
-import { db, setSetting, type Person } from '../db'
-import { currentSession } from '../sync'
+import { db, setSetting, uid, type Person } from '../db'
+import { currentSession, syncNow } from '../sync'
 import { Logo } from './brand'
 
 // Who's logging: each person picks their name and types their 4-digit PIN. Works with no signal
@@ -21,12 +21,44 @@ export function Avatar({ name }: { name: string }) {
   return <span className="ava" style={{ background: personColor(name) }}>{name.trim()[0]?.toUpperCase() ?? '?'}</span>
 }
 
+/** Make your own profile: a name and a 4-digit PIN. The very first person on the farm is the owner
+ * (office); everyone after that starts as crew, and the office can change the role in Settings, Users.
+ * The phone then remembers who it is until "Switch person". */
+export function ProfileForm({ onSaved }: { onSaved: (p: Person) => void }) {
+  const [name, setName] = useState('')
+  const [pin, setPin] = useState('')
+  const [err, setErr] = useState('')
+  const [busy, setBusy] = useState(false)
+  async function save() {
+    const n = name.trim().replace(/\s+/g, ' ')
+    const people = await db.people.toArray()
+    if (people.some((p) => p.name.toLowerCase() === n.toLowerCase())) return setErr(`There's already a ${n}. Pick them from the list, or add your last name.`)
+    setBusy(true)
+    const first = !people.length
+    const p: Person = { id: uid(), name: n, role: first ? 'office' : 'crew', pinHash: await hashPin(n, pin), email: null, owner: first || undefined }
+    await db.people.put(p)
+    await setSetting('me', p.name); await setSetting('meId', p.id)
+    syncNow().catch(() => {}) // sends the new profile up when there's signal, so other phones and the office see it
+    setBusy(false)
+    onSaved(p)
+  }
+  return <div className="card" style={{ padding: 14 }}>
+    <label className="fld"><span>Your name</span><input value={name} onChange={(e) => { setName(e.target.value); setErr('') }} placeholder="First and last name" autoComplete="name" /></label>
+    <label className="fld"><span>Pick a 4-digit PIN. The last four of your phone number is easy to remember.</span>
+      <input type="password" inputMode="numeric" maxLength={4} value={pin} onChange={(e) => setPin(e.target.value.replace(/\D/g, ''))} placeholder="••••" autoComplete="off" style={{ letterSpacing: 6 }} /></label>
+    {err && <p className="note warn">{err}</p>}
+    <button className="cta" disabled={busy || name.trim().length < 2 || !/^\d{4}$/.test(pin)} onClick={save}>{busy ? 'Saving…' : 'Save and start'}</button>
+    <p className="note">This phone remembers you. Next time the app opens straight to your screens.</p>
+  </div>
+}
+
 export function SignIn({ onIn }: { onIn: (p: Person) => void }) {
   const people = useLiveQuery(() => db.people.orderBy('name').toArray(), [], [])
   const [email, setEmail] = useState<string | null>(null)
   const [who, setWho] = useState<Person | null>(null)
   const [pin, setPin] = useState('')
   const [err, setErr] = useState('')
+  const [isNew, setIsNew] = useState(false)
   useEffect(() => { currentSession().then((s) => setEmail(s?.user.email?.toLowerCase() ?? null)) }, [])
   const shown = people.filter((p) => p.pinHash || (email && p.email?.toLowerCase() === email))
   async function go(p: Person, value: string) {
@@ -37,12 +69,16 @@ export function SignIn({ onIn }: { onIn: (p: Person) => void }) {
   return (
     <div className="page">
       <div className="wel" style={{ paddingTop: 24 }}><div className="mark"><Logo animate size={84} /></div><h1>Who's logging?</h1><p>Pick your name, then enter your PIN.</p></div>
-      {!who ? <div className="card">{shown.map((p, i) => (
+      {isNew ? <>
+        <ProfileForm onSaved={onIn} />
+        <button className="cta sec2" onClick={() => setIsNew(false)}>Back to the list</button>
+      </> : !who ? <><div className="card">{shown.map((p, i) => (
         <button key={p.id} className="row stag" style={{ '--i': Math.min(i, 12) } as any} onClick={() => (p.pinHash ? setWho(p) : go(p, ''))}>
           <Avatar name={p.name} /><span className="t"><b>{p.name}</b><span>{ROLE_LABEL[p.role] ?? p.role}</span></span>
         </button>))}
-        {!shown.length && <div className="row"><span className="t"><b>No one set up on this phone yet</b><span>Ask the office to add you with a PIN.</span></span></div>}
+        {!shown.length && <div className="row"><span className="t"><b>No one set up on this phone yet</b><span>Tap "I'm new here" to make your profile.</span></span></div>}
       </div>
+        <button className="cta ghost" onClick={() => setIsNew(true)}>I'm new here</button></>
         : <div className="card form" style={{ padding: 14, textAlign: 'center' }}>
           <Avatar name={who.name} /><b style={{ display: 'block', fontSize: 20, marginTop: 6 }}>{who.name}</b>
           <input id="pin" autoFocus type="password" inputMode="numeric" maxLength={6} value={pin} placeholder="PIN" aria-label="PIN" style={{ display: 'block', width: '100%', maxWidth: '100%', textAlign: 'center', fontSize: 28, letterSpacing: 8, marginTop: 12 }}

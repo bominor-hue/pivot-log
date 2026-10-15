@@ -87,4 +87,14 @@ describe('database rules', { timeout: 30000 }, () => {
     await pg.exec(entry())
     expect((await pg.query('select * from entry')).rows.length).toBe(2)
   })
+
+  it('crew phones can add a new crew profile, nothing more', async () => {
+    const pg = await setup()
+    await as(pg, 'office@farm.test', 'otp'); await pg.query('select claim_office()')
+    await as(pg, 'crew@farm.test', 'password')
+    await pg.exec(`insert into person (id, data) values ('c1', '{"name":"Juan","role":"crew"}')`)
+    await expect(pg.exec(`insert into person (id, data) values ('c2', '{"name":"Me","role":"office"}')`)).rejects.toThrow()
+    await pg.exec(`update person set data = '{"name":"Juan","role":"office"}'`) // no update rule: changes nothing
+    expect((await pg.query<{ r: string }>(`select data ->> 'role' r from person`)).rows).toEqual([{ r: 'crew' }])
+  })
 })
