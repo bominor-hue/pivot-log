@@ -1,3 +1,4 @@
+import { clientScope } from '../domain/client'
 import { db, uid, type Entry, type Pivot } from '../db'
 import { setProfile } from '../domain/pivot'
 import { norm, pick, toNum, type Row } from './read'
@@ -13,7 +14,7 @@ export const cleanAlias = (a: any) => String(a ?? '').replace(/&amp;?/g, '&').re
 export const READS_DRY = 'agsenseReadsDry'
 
 export async function planAgSense(rows: Row[], from: string, to: string): Promise<AgPlan> {
-  const pivots = await db.pivots.toArray()
+  const pivots = (await clientScope()).pivots
   const byAlias = new Map(pivots.filter((p) => p.agsenseName).map((p) => [norm(cleanAlias(p.agsenseName)), p]))
   const bySerial = new Map(pivots.filter((p) => p.profile.agsenseSerial).map((p) => [String(p.profile.agsenseSerial.value), p]))
   const byName = new Map(pivots.map((p) => [norm(p.name), p]))

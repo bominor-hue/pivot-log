@@ -12,6 +12,8 @@ import { Reports } from './ui/Reports'
 import { FieldDetail, Fields, Log, MapView, PivotDetail, Today } from './ui/screens'
 import { TurnSheet } from './ui/TurnSheet'
 import { SignIn } from './ui/SignIn'
+import { ClientPicker, ClientSheet } from './ui/Clients'
+import { allowedClients, listClients } from './domain/client'
 import { fileReminders } from './push'
 import { lapReminders } from './reminders'
 
@@ -41,6 +43,14 @@ export function App() {
   const [role, setRole] = useState<string | null>(null)
   const people = useLiveQuery(() => db.people.toArray(), [])
   const meId = useLiveQuery(() => db.settings.get('meId'), [])
+  const clients = useLiveQuery(listClients, [])
+  const picked = useLiveQuery(() => getSetting<string | null>('clientId', null), [], null)
+  const [clientSheet, setClientSheet] = useState(false)
+  useEffect(() => {
+    if (!clients || !people) return
+    const mine = allowedClients(clients, people.find((p) => p.id === meId?.value))
+    if (mine.length === 1 && picked !== mine[0].id) setSetting('clientId', mine[0].id)
+  }, [clients, people, meId, picked])
   useEffect(() => { getSetting('me', '').then(setMe) }, [])
   useEffect(() => { setRole(people?.find((p) => p.id === meId?.value)?.role ?? null) }, [people, meId])
   useEffect(() => { if (msg) { const t = setTimeout(() => setMsg(''), 2600); return () => clearTimeout(t) } }, [msg])
@@ -75,7 +85,7 @@ export function App() {
 
   const push = useCallback((r: Route) => setStack((s) => [...s, r]), [])
   const back = useCallback(() => setStack((s) => s.slice(0, -1)), [])
-  if (!state || !people) return null
+  if (!state || !people || !clients) return null
   const signedIn = !people.length || people.some((p) => p.id === meId?.value)
   // With no people set up yet (first setup, or the demo) everyone can do everything.
   const canAdmin = !people.length || role === 'office' || role === 'manager'
@@ -83,7 +93,10 @@ export function App() {
   const top = stack.at(-1)
   // Viewers only look; the database refuses their entries too (supabase/migrations/0003_viewers.sql).
   const doTurn = (pivotId: string, mode: 'on' | 'off' | 'run') => role === 'viewer' ? setMsg('Viewers can look but not turn pivots on or off.') : setTurn({ pivotId, mode })
-  const full = { push, back, turn: doTurn, toast: setMsg, state, me, crop, setCrop, canAdmin }
+  // Clients: someone who can see more than one picks one first; with only one it is picked for them.
+  const mine = allowedClients(clients ?? [], people.find((p) => p.id === meId?.value))
+  const needClient = mine.length > 1 && !mine.some((c) => c.id === picked)
+  const full = { push, back, turn: doTurn, toast: setMsg, state, me, crop, setCrop, canAdmin, clients: mine, openClients: () => setClientSheet(true) }
   // The crop filter narrows the main tabs; a pivot, field or settings page always shows the whole farm.
   const nav = top ? full : { ...full, state: filterState(state, crop) }
   const title = top?.kind === 'field' ? 'Field' : top?.kind === 'pivot' ? 'Pivot' : top?.kind === 'import' ? 'Import' : top?.kind === 'settings' ? 'Settings' : top?.kind === 'welcome' ? 'Setup' : ''
@@ -100,19 +113,20 @@ export function App() {
         {top.kind === 'import' && (canAdmin ? <ImportScreen /> : <div className="page"><p className="note">Importing is for the office and managers. Ask the office to sign in.</p></div>)}
         {top.kind === 'settings' && <Settings key={top.tab ?? ''} tab={top.tab} onMe={setMe} canAdmin={canAdmin} signOut={async () => { await setSetting('meId', null); setStack([]) }} />}
         {top.kind === 'welcome' && <Welcome onDone={() => setStack([])} onProfile={(p) => { setMe(p.name); setRole(p.role) }} />}
-      </> : welcome ? <Welcome onDone={() => {}} onProfile={(p) => { setMe(p.name); setRole(p.role) }} /> : <>
+      </> : welcome ? <Welcome onDone={() => {}} onProfile={(p) => { setMe(p.name); setRole(p.role) }} /> : needClient ? <ClientPicker clients={mine} /> : <>
         {tab === 'today' && <Today />}
         {tab === 'map' && <MapView />}
         {tab === 'log' && <Log />}
         {tab === 'fields' && <Fields />}
         {tab === 'reports' && <Reports />}
       </>}
-      {!welcome && <nav className="tabbar"><div className="in">
+      {!welcome && !(needClient && !top) && <nav className="tabbar"><div className="in">
         {(Object.keys(LABELS) as Tab[]).map((t) => (
           <button key={t} className={tab === t && !top ? 'on' : ''} aria-current={tab === t && !top ? 'page' : undefined} onClick={() => { setTab(t); setStack([]) }}>
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">{ICONS[t]}</svg>{LABELS[t]}
           </button>))}
       </div></nav>}
+      {clientSheet && <ClientSheet onClose={() => setClientSheet(false)} />}
       {turn && <NavCtx.Provider value={full}><TurnSheet {...turn} onClose={() => setTurn(null)} /></NavCtx.Provider>}
       {banner && <button className="banner" aria-live="polite" onClick={() => { setStack([{ kind: 'pivot', id: banner.pivotId }]); setBanner(null) }}>
         <LapRing frac={banner.soon ? 0.88 : 1} ok check={!banner.soon} size={36} /><span><b>{banner.title}</b><span>{banner.body}</span></span><small>now</small>

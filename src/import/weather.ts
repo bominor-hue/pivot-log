@@ -1,10 +1,11 @@
+import { clientScope } from '../domain/client'
 import { db, uid } from '../db'
 import { norm, pick, toDate, toNum, type Row } from './read'
 
 // Weather CSV: one row per day with ETo, and optionally rain. Rain can be one column for the whole
 // farm, or a "pivot" column for rain by pivot (the NOAA MRMS layout).
 export async function importWeather(rows: Row[], fileName: string, who: string, source: string): Promise<string> {
-  const pivots = new Map((await db.pivots.toArray()).map((p) => [norm(p.name), p.id]))
+  const pivots = new Map((await clientScope()).pivots.map((p) => [norm(p.name), p.id]))
   const allPivots = [...pivots.values()]
   let eto = 0, rain = 0, skipped = 0
   await db.transaction('rw', [db.weather, db.rain, db.imports], async () => {

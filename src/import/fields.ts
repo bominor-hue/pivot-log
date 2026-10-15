@@ -1,3 +1,4 @@
+import { clientScope } from '../domain/client'
 import { db, uid, type CropSeason, type Farm, type Field, type Pivot } from '../db'
 import { acresOf, type Shape } from './boundaries'
 import { norm, pick, toDate, toNum, type Row } from './read'
@@ -32,7 +33,7 @@ export function normalizeCrop(v: any): string | null {
 }
 
 export async function planFields(rows: FieldRow[], shapes: Shape[], year: number): Promise<FieldPlan> {
-  const existing = await db.fields.toArray()
+  const existing = (await clientScope()).fields // names match only within the picked client
   const byName = new Map(existing.map((f) => [norm(f.name), f]))
   const shapeBy = new Map(shapes.map((s) => [norm(s.name), s]))
   const used = new Set<string>()
@@ -62,12 +63,13 @@ export async function planFields(rows: FieldRow[], shapes: Shape[], year: number
 
 export async function applyFields(plan: FieldPlan, fileName: string, who: string): Promise<string> {
   const now = new Date().toISOString()
+  const scope = await clientScope()
   await db.transaction('rw', [db.farms, db.fields, db.pivots, db.cropSeasons, db.imports], async () => {
-    const farms = new Map((await db.farms.toArray()).map((f) => [norm(f.name), f]))
-    const pivots = new Map((await db.pivots.toArray()).map((p) => [norm(p.name), p]))
+    const farms = new Map(scope.farms.map((f) => [norm(f.name), f]))
+    const pivots = new Map(scope.pivots.map((p) => [norm(p.name), p]))
     const farmId = async (name: string): Promise<string> => {
       const k = norm(name)
-      if (!farms.has(k)) { const f: Farm = { id: uid(), name }; await db.farms.add(f); farms.set(k, f) }
+      if (!farms.has(k)) { const f: Farm = { id: uid(), name, clientId: scope.clientId }; await db.farms.add(f); farms.set(k, f) }
       return farms.get(k)!.id
     }
     for (const it of plan.items) {

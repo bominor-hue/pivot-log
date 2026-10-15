@@ -4,7 +4,7 @@ import { db, getSetting, setSetting, type Entry } from './db'
 // Hosted database (Supabase Postgres, in the farm's own account). Optional: with no keys set the app
 // runs fully on the device. With keys set and a login on the phone:
 //   - entries queue on the phone and push up when there is signal, and everyone's entries come down;
-//   - master lists (farms, pivots, fields, crops, people, probes, weather, rain) come down to every
+//   - master lists (clients, farms, pivots, fields, crops, people, probes, weather, rain) come down to every
 //     phone, and go up from the office's device after an import.
 // Logins: the office signs in with an email link; crew phones share one crew login (email + password)
 // that the office types in once. See supabase/migrations/0001_init.sql for who may write what.
@@ -15,6 +15,7 @@ export const supabase: SupabaseClient | null = url && key ? createClient(url, ke
 
 /** Local table <-> server table. Server rows are { id, data } with data = the local row. */
 const MASTER = [
+  { table: 'client', local: () => db.clients, id: (r: any) => r.id as string },
   { table: 'farm', local: () => db.farms, id: (r: any) => r.id as string },
   { table: 'pivot', local: () => db.pivots, id: (r: any) => r.id as string },
   { table: 'field', local: () => db.fields, id: (r: any) => r.id as string },
