@@ -1,9 +1,13 @@
-# Every morning: radar rain for each pivot (jobs/nightly_rain.py) and the farm's estimated ETo
-# (jobs/nightly_eto.py, until the UGA station feed replaces it) into the farm database.
+# Every morning: radar rain for each pivot (jobs/nightly_rain.py), the farm's estimated ETo
+# (jobs/nightly_eto.py, until the UGA station feed replaces it) and the AgSense pivots' runs
+# (jobs/nightly_agsense.py, read-only) into the farm database.
 # Can also be run by hand from the Actions tab ("Run workflow"), with optional dates to backfill.
 # Needs repository secrets (Settings > Secrets and variables > Actions):
 #   SUPABASE_PROJECT_REF   already set for the Database job
 #   SUPABASE_SERVICE_KEY   Supabase > Project Settings > API Keys > secret key (never paste it anywhere else)
+# The AgSense step skips itself until these five are set (all from AgSense once the API license is signed):
+#   AGSENSE_USERNAME, AGSENSE_PASSWORD   a read-only WagNet login for the API
+#   AGSENSE_APID, AGSENSE_KEY, AGSENSE_IV   the API ID, key and IV AgSense issues
 name: Nightly
 on:
   schedule:
@@ -36,3 +40,12 @@ jobs:
         env:
           START: ${{ inputs.start }}
         run: python3 jobs/nightly_eto.py ${START:+--start "$START"}
+      - if: ${{ !cancelled() }}
+        env:
+          START: ${{ inputs.start }}
+          AGSENSE_USERNAME: ${{ secrets.AGSENSE_USERNAME }}
+          AGSENSE_PASSWORD: ${{ secrets.AGSENSE_PASSWORD }}
+          AGSENSE_APID: ${{ secrets.AGSENSE_APID }}
+          AGSENSE_KEY: ${{ secrets.AGSENSE_KEY }}
+          AGSENSE_IV: ${{ secrets.AGSENSE_IV }}
+        run: python3 jobs/nightly_agsense.py ${START:+--start "$START"}
